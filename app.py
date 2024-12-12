@@ -1,8 +1,10 @@
 from flask import Flask, request, jsonify, render_template, Response
+from flask_compress import Compress
 from kubernetes import client, config
 import os
 
 app = Flask(__name__)
+Compress(app)  # Enable GZIP compression
 
 # Load in-cluster configuration
 config.load_incluster_config()
@@ -68,13 +70,15 @@ def get_logs():
                 return
 
             pod_name = pod_list[0].metadata.name
-            pod_status = pod_list[0].status.phase
+            log_lines = v1.read_namespaced_pod_log(
+                name=pod_name,
+                namespace=namespace,
+                tail_lines=100,  # Limit logs to the last 100 lines
+                follow=True,
+                _preload_content=False
+            ).stream()
 
-            if pod_status != "Running":
-                yield f"Pod {pod_name} is in status {pod_status} and not ready for logs."
-                return
-
-            for line in v1.read_namespaced_pod_log(name=pod_name, namespace=namespace, follow=True, _preload_content=False).stream():
+            for line in log_lines:
                 yield line.decode('utf-8')
         except client.exceptions.ApiException as e:
             yield f"Error: {str(e)}"

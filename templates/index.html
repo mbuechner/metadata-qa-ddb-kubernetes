@@ -7,6 +7,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
     <script>
         let logInterval = null;
+        let modalInstance = null;
 
         async function fetchPodStatus() {
             const statusResponse = await fetch('/is_running');
@@ -14,11 +15,13 @@
             const logsElement = document.getElementById('logs');
             const startButton = document.getElementById('startButton');
             const stopButton = document.getElementById('stopButton');
+            const spinner = document.getElementById('spinner');
 
             if (data.running) {
                 logsElement.textContent = data.message;
                 startButton.disabled = true;
                 stopButton.disabled = false;
+                spinner.style.display = 'inline-block';
 
                 // Start fetching logs if the pod is running and no interval is set
                 if (!logInterval) {
@@ -28,6 +31,7 @@
                 logsElement.textContent = data.message;
                 startButton.disabled = false;
                 stopButton.disabled = true;
+                spinner.style.display = 'none';
 
                 // Clear the log fetching interval if the pod is not running
                 if (logInterval) {
@@ -41,6 +45,9 @@
             const logsResponse = await fetch('/get_logs');
             const logsElement = document.getElementById('logs');
             logsElement.textContent = await logsResponse.text();
+            
+            // Scroll to the bottom of the log container
+            logsElement.scrollTop = logsElement.scrollHeight;
         }
 
         function confirmAction(action) {
@@ -51,42 +58,66 @@
             if (action === 'start') {
                 modalTitle.textContent = 'Start Pod';
                 modalBody.textContent = 'Are you sure you want to start the pod?';
-                modalConfirmButton.onclick = startPod;
+                modalConfirmButton.onclick = () => {
+                    startPod();
+                    modalInstance.hide();
+                };
             } else if (action === 'stop') {
                 modalTitle.textContent = 'Stop Pod';
                 modalBody.textContent = 'Are you sure you want to stop the pod?';
-                modalConfirmButton.onclick = deletePod;
+                modalConfirmButton.onclick = () => {
+                    deletePod();
+                    modalInstance.hide();
+                };
             }
 
-            const modal = new bootstrap.Modal(document.getElementById('confirmationModal'));
-            modal.show();
+            modalInstance = new bootstrap.Modal(document.getElementById('confirmationModal'));
+            modalInstance.show();
+        }
+
+        async function showAlert(message, type) {
+            const alertContainer = document.getElementById('alertContainer');
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+            alertDiv.role = 'alert';
+            alertDiv.innerHTML = `${message} <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>`;
+            alertContainer.appendChild(alertDiv);
         }
 
         async function startPod() {
             const response = await fetch('/start_pod', { method: 'POST' });
             const data = await response.json();
-            alert(data.message || data.error);
+            showAlert(data.message || data.error, response.ok ? 'success' : 'danger');
             fetchPodStatus(); // Update the status after starting
         }
 
         async function deletePod() {
             const response = await fetch('/delete_pod', { method: 'POST' });
             const data = await response.json();
-            alert(data.message || data.error);
+            showAlert(data.message || data.error, response.ok ? 'success' : 'danger');
             fetchPodStatus(); // Update the status after stopping
         }
 
         // Initial status check
-        fetchPodStatus();
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('startButton').disabled = true;
+            document.getElementById('stopButton').disabled = true;
+            document.getElementById('spinner').style.display = 'none';
+            fetchPodStatus();
+        });
     </script>
 </head>
 <body>
     <div class="container mt-5">
         <h1 class="text-center">Pod Manager</h1>
+        <div id="alertContainer" class="mt-3"></div>
         <div class="row mt-4">
             <div class="col-md-12 text-center">
-                <button id="startButton" class="btn btn-success me-2" onclick="confirmAction('start')" disabled="true">Start Pod</button>
-                <button id="stopButton" class="btn btn-danger" onclick="confirmAction('stop')" disabled="true">Stop Pod</button>
+                <button id="startButton" class="btn btn-success me-2" onclick="confirmAction('start')">Start Pod</button>
+                <button id="stopButton" class="btn btn-danger me-2" onclick="confirmAction('stop')">Stop Pod</button>
+                <div id="spinner" class="spinner-border text-primary" role="status" style="display: none;">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
             </div>
         </div>
         <div class="row mt-4">
