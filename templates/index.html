@@ -117,14 +117,9 @@
                 <button id="startButton" class="btn btn-success me-2" onclick="confirmAction('start')" disable="true">Start Pod</button>
                 <button id="stopButton" class="btn btn-danger me-2" onclick="confirmAction('stop')" disable="true">Stop Pod</button>
             </div>
-            <div class="col-md-12 text-center mb-3">
-                <div id="spinner" class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-            </div>
         </div>
-        <div class="row">
-            <pre id="logs" class="bg-light p-3 border rounded w-100" style="height: 300px; overflow-y: auto;"></pre>
+        <div id="logs-container" class="row mt-4">
+            <pre id="logs" class="bg-light p-3 border rounded w-100"></pre>
         </div>
 
         <!-- Confirmation Modal -->
