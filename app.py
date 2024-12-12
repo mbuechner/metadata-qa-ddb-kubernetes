@@ -5,8 +5,8 @@ import time
 
 app = Flask(__name__)
 
-# Load Kubernetes configuration
-config.load_kube_config()
+# Load cluster configuration
+config.load_incluster_config()
 
 v1 = client.CoreV1Api()
 
