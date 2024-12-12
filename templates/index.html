@@ -9,7 +9,6 @@
         let logInterval = null;
         let modalInstance = null;
         let isRunning = false;
-        let isMaximized = false;
 
         async function fetchPodStatus() {
             const statusResponse = await fetch('/is_running');
@@ -130,7 +129,7 @@
             </div>
         </div>
         <div id="logs-container" class="row mt-4">
-            <pre id="logs" class="bg-light p-3 border rounded w-100" style="height:600px;"></pre>
+            <pre id="logs" class="bg-light p-3 border rounded w-100" style="height: 300px; overflow-y: auto;"></pre>
         </div>
 
         <!-- Confirmation Modal -->
