@@ -9,6 +9,7 @@
         let logInterval = null;
         let modalInstance = null;
         let isRunning = false;
+        let isMaximized = false;
 
         async function fetchPodStatus() {
             const statusResponse = await fetch('/is_running');
@@ -20,7 +21,7 @@
             if (data.running) {
                 startButton.disabled = true;
                 stopButton.disabled = false;
-                spinner.style.display = 'inline-block';
+                spinner.style.animationIterationCount = 'Infinite';
 
                 // Start fetching logs if the pod is running and no interval is set
                 if (!logInterval) {
@@ -33,7 +34,7 @@
             } else {
                 startButton.disabled = false;
                 stopButton.disabled = true;
-                spinner.style.display = 'none';
+                spinner.style.animationIterationCount = 0;
 
                 // Clear the log fetching interval if the pod is not running
                 if (logInterval) {
@@ -49,8 +50,13 @@
             const logsElement = document.getElementById('logs');
             logsElement.textContent = await logsResponse.text();
             
-            // Scroll to the bottom of the log container
-            logsElement.scrollTop = logsElement.scrollHeight;
+            // Store the current scroll position
+            const isAtBottom = logsElement.scrollHeight - logsElement.scrollTop === logsElement.clientHeight;
+            // Scroll to bottom only if the user was already at the bottom
+            if (isAtBottom) {
+                logsElement.scrollTop = logsElement.scrollHeight;
+            }
+            
             isRunning = false;
         }
 
@@ -104,6 +110,8 @@
 
         // Initial status check
         document.addEventListener('DOMContentLoaded', () => {
+            const spinner = document.getElementById('spinner');
+            spinner.style.animationIterationCount = 0;
             fetchPodStatus();
         });
     </script>
@@ -114,12 +122,15 @@
         <div id="alertContainer" class="mt-3"></div>
         <div class="row mt-4">
             <div class="col-md-12 text-center mb-3">
-                <button id="startButton" class="btn btn-success me-2" onclick="confirmAction('start')" disable="true">Start Pod</button>
+                <button id="startButton" class="btn btn-success me-2" onclick="confirmAction('start')" disable="true">
+                  <span id="spinner" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                    <span role="status">Start Pod</span>
+                </button>
                 <button id="stopButton" class="btn btn-danger me-2" onclick="confirmAction('stop')" disable="true">Stop Pod</button>
             </div>
         </div>
         <div id="logs-container" class="row mt-4">
-            <pre id="logs" class="bg-light p-3 border rounded w-100"></pre>
+            <pre id="logs" class="bg-light p-3 border rounded w-100" style="height:600px;"></pre>
         </div>
 
         <!-- Confirmation Modal -->
