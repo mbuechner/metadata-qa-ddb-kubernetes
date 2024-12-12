@@ -8,27 +8,29 @@
     <script>
         let logInterval = null;
         let modalInstance = null;
+        let isRunning = false;
 
         async function fetchPodStatus() {
             const statusResponse = await fetch('/is_running');
             const data = await statusResponse.json();
-            const logsElement = document.getElementById('logs');
             const startButton = document.getElementById('startButton');
             const stopButton = document.getElementById('stopButton');
             const spinner = document.getElementById('spinner');
 
             if (data.running) {
-                logsElement.textContent = data.message;
                 startButton.disabled = true;
                 stopButton.disabled = false;
                 spinner.style.display = 'inline-block';
 
                 // Start fetching logs if the pod is running and no interval is set
                 if (!logInterval) {
-                    logInterval = setInterval(fetchLogs, 1000);
+                    logInterval = setInterval(() => {
+                          if (!isRunning) {
+                              fetchLogs(); // Starte die Funktion nur, wenn sie nicht läuft
+                          }
+                       }, 1000);
                 }
             } else {
-                logsElement.textContent = data.message;
                 startButton.disabled = false;
                 stopButton.disabled = true;
                 spinner.style.display = 'none';
@@ -42,12 +44,14 @@
         }
 
         async function fetchLogs() {
+            isRunning = true;
             const logsResponse = await fetch('/get_logs');
             const logsElement = document.getElementById('logs');
             logsElement.textContent = await logsResponse.text();
             
             // Scroll to the bottom of the log container
             logsElement.scrollTop = logsElement.scrollHeight;
+            isRunning = false;
         }
 
         function confirmAction(action) {

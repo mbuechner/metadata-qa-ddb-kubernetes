@@ -63,16 +63,14 @@ def get_logs():
                 return
 
             pod_name = pods[0].metadata.name
-            log_stream = v1.read_namespaced_pod_log(
+            log_lines = v1.read_namespaced_pod_log(
                 name=pod_name,
                 namespace=namespace,
-                tail_lines=100,  # Limit logs to the last 100 lines
-                follow=True,
-                _preload_content=False
-            ).stream()
+                tail_lines=32  # Limit logs to the last 32 lines
+            )
 
-            for line in log_stream:
-                yield line.decode("utf-8")
+            for line in log_lines.splitlines():
+                yield f"{line}\n"
         except client.exceptions.ApiException as e:
             yield f"Error: {str(e)}"
 
