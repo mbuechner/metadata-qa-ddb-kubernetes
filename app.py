@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import threading
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from flask_compress import Compress
 from flask_socketio import SocketIO
 from kubernetes import client, config
@@ -150,16 +150,17 @@ async def get_status():
 
 @socketio.on('connect')
 def connect():
-    logging.info(f'${request.sid} connected')
+    logging.info(f'{request.sid} connected')
     get_status()
 
 @socketio.on('disconnect')
 def disconnect():
-    logging.info(f'${request.sid} disconnected')
+    logging.info(f'{request.sid} disconnected')
 
 @socketio.on_error_default
 def default_error_handler(e):
-    logging.exception("SocketIO Error", e)
+    logging.error(f'SocketIO Error: {request.event["message"]} ({request.event["args"]})')
+    logging.exception(e)
 
 if __name__ == '__main__':
     socketio.run(app, host="0.0.0.0", port=5000, debug=True, logger=True, engineio_logger=True)
