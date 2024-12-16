@@ -2,8 +2,6 @@ import asyncio
 import logging
 import os
 import threading
-import eventlet
-from eventlet import wsgi
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO
 from kubernetes import client, config
@@ -163,4 +161,4 @@ def default_error_handler(e):
     logging.exception(e)
 
 if __name__ == '__main__':
-    wsgi.server(eventlet.listen(("0.0.0.0", 5000)), socketio)
+    socketio.run(app, host="0.0.0.0", port=5000)
