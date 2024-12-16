@@ -3,14 +3,12 @@ import logging
 import os
 import threading
 from flask import Flask, render_template, request
-from flask_compress import Compress
 from flask_socketio import SocketIO
 from kubernetes import client, config
 
 # Initialize Flask app
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY")
-Compress(app)  # Enable GZIP compression
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Kubernetes API Configuration
