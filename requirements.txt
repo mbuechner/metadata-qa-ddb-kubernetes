@@ -1,4 +1,6 @@
 flask
 flask-compress
+flask-socketio
+eventlet
 gunicorn
 kubernetes

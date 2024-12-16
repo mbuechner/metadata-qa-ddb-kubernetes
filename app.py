@@ -1,15 +1,24 @@
-from flask import Flask, request, jsonify, Response, render_template
+import asyncio
+import threading
+from flask import Flask, render_template
 from flask_compress import Compress
+from flask_socketio import SocketIO
 from kubernetes import client, config
 
 # Initialize Flask app
 app = Flask(__name__)
 Compress(app)  # Enable GZIP compression
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Kubernetes API Configuration
 config.load_incluster_config()
 v1 = client.CoreV1Api()
 apps_v1 = client.AppsV1Api()
+
+# Log stream
+log_stream_active = False
+log_stream_thread = None
+log_stream_lock = threading.Lock()
 
 namespace = "ddbmetadata-qa"
 deployment_name = "ddbmetadata-qa"
@@ -18,63 +27,116 @@ deployment_name = "ddbmetadata-qa"
 def index():
     return render_template('index.html')
 
-@app.route('/is_running', methods=['GET'])
-def is_running():
+@socketio.on('start_pod')
+async def start_pod():
     try:
-        pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
-        if not pods:
-            return jsonify({"running": False, "message": "No pods are currently running."})
+        if not v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items:
+            scale = apps_v1.read_namespaced_deployment_scale(name=deployment_name, namespace=namespace)
+            scale.spec.replicas = 1
+            apps_v1.replace_namespaced_deployment_scale(name=deployment_name, namespace=namespace, body=scale)
+            socketio.emit('status_update', {'message': 'Pod is starting...', 'status': 'Starting'})
 
-        pod_status = pods[0].status.phase
-        if pod_status == "Running":
-            return jsonify({"running": True, "message": "Pod is running."})
-        else:
-            return jsonify({"running": False, "message": f"Pod is in status {pod_status}."})
+        while True:
+            pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
+            if pods:
+                pod_status = pods[0].status.phase
+                socketio.emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status})
+                if pod_status == "Running":
+                    break
+            await asyncio.sleep(1)  # Asynchrones Schlafen
+
     except client.exceptions.ApiException as e:
-        return jsonify({"error": str(e)}), 500
+        socketio.emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'})
 
-@app.route('/start_pod', methods=['POST'])
-def start_pod():
+
+@socketio.on('delete_pod')
+async def delete_pod():
     try:
-        scale = apps_v1.read_namespaced_deployment_scale(name=deployment_name, namespace=namespace)
-        scale.spec.replicas = 1
-        apps_v1.replace_namespaced_deployment_scale(name=deployment_name, namespace=namespace, body=scale)
-        return jsonify({"message": "Pod started successfully."})
-    except client.exceptions.ApiException as e:
-        return jsonify({"error": str(e)}), 500
+        if v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items:
+            # Scale the deployment to 0 replicas
+            scale = apps_v1.read_namespaced_deployment_scale(name=deployment_name, namespace=namespace)
+            scale.spec.replicas = 0
+            apps_v1.replace_namespaced_deployment_scale(name=deployment_name, namespace=namespace, body=scale)
+            socketio.emit('status_update', {'message': 'Pod is stopping...', 'status': 'stopping'})
 
-@app.route('/delete_pod', methods=['POST'])
-def delete_pod():
+        # Confirm the pod has stopped
+        while True:
+            pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
+            if pods:
+                pod_status = pods[0].status.phase
+                socketio.emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status})
+            else:
+                socketio.emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'})
+                break
+            await asyncio.sleep(1)  # Asynchrones Schlafen
+
+    except client.exceptions.ApiException as e:
+        socketio.emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'})
+
+
+async def broadcast_logs():
+    global log_stream_active
+
     try:
-        scale = apps_v1.read_namespaced_deployment_scale(name=deployment_name, namespace=namespace)
-        scale.spec.replicas = 0
-        apps_v1.replace_namespaced_deployment_scale(name=deployment_name, namespace=namespace, body=scale)
-        return jsonify({"message": "Pod stopped successfully."})
-    except client.exceptions.ApiException as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/get_logs', methods=['GET'])
-def get_logs():
-    def stream_logs():
-        try:
+        while True:
+            # Check if the pod exists
             pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
             if not pods:
-                yield "No pods are currently running."
-                return
+                socketio.emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'})
+                log_stream_active = False
+                break
 
             pod_name = pods[0].metadata.name
-            log_lines = v1.read_namespaced_pod_log(
-                name=pod_name,
-                namespace=namespace,
-                tail_lines=32  # Limit logs to the last 32 lines
-            )
 
-            for line in log_lines.splitlines():
-                yield f"{line}\n"
-        except client.exceptions.ApiException as e:
-            yield f"Error: {str(e)}"
+            try:
+                # Stream logs directly from the Kubernetes API
+                log_stream = v1.read_namespaced_pod_log(
+                    name=pod_name,
+                    namespace=namespace,
+                    follow=True,
+                    _preload_content=False
+                ).stream()
 
-    return Response(stream_logs(), mimetype='text/plain')
+                for line in log_stream:
+                    if not log_stream_active:
+                        return
+                    socketio.emit('log_update', {'message': line.decode('utf-8').strip()})
+            except client.exceptions.ApiException as e:
+                socketio.emit('status_update', {'message': f"{str(e)}", 'status': 'Error'})
+                await asyncio.sleep(1)
+
+            # Check if the pod is terminated
+            pod_status = pods[0].status.phase
+            if pod_status != "Running":
+                socketio.emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status})
+                log_stream_active = False
+                break
+
+    except client.exceptions.ApiException as e:
+        socketio.emit('log_update', {'message': f"Error: {str(e)}"})
+        log_stream_active = False
+
+
+@socketio.on('start_log_streaming')
+async def start_log_streaming():
+    global log_stream_thread, log_stream_active
+
+    with log_stream_lock:
+        if log_stream_active:
+            socketio.emit('status_update', {'message': 'Log streaming is already active.'})
+            return
+        log_stream_active = True
+        log_stream_thread = threading.Thread(target=broadcast_logs)
+        log_stream_thread.start()
+        socketio.emit('status_update', {'message': 'Log streaming started.', 'status': 'Active'})
+
+@socketio.on('stop_log_streaming')
+async def stop_log_streaming():
+    global log_stream_active
+    with log_stream_lock:
+        log_stream_active = False
+        socketio.emit('status_update', {'message': 'Log streaming stopped.', 'status': 'Stopped'})
+
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=False)
