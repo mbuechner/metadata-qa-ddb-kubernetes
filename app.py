@@ -147,16 +147,16 @@ async def get_status():
         socketio.emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'})
 
 @socketio.on('connect')
-def connect():
+async def connect():
     logging.info(f'{request.sid} connected')
-    get_status()
+    await get_status()
 
 @socketio.on('disconnect')
-def disconnect():
+async def disconnect():
     logging.info(f'{request.sid} disconnected')
 
 @socketio.on_error_default
-def default_error_handler(e):
+async def default_error_handler(e):
     logging.error(f'SocketIO Error: {request.event["message"]} ({request.event["args"]})')
     logging.exception(e)
 
