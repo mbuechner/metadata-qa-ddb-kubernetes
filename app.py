@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import os
 import threading
 from flask import Flask, render_template
 from flask_compress import Compress
@@ -7,6 +9,7 @@ from kubernetes import client, config
 
 # Initialize Flask app
 app = Flask(__name__)
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY")
 Compress(app)  # Enable GZIP compression
 socketio = SocketIO(app, cors_allowed_origins="*")
 
@@ -57,7 +60,7 @@ async def delete_pod():
             scale = apps_v1.read_namespaced_deployment_scale(name=deployment_name, namespace=namespace)
             scale.spec.replicas = 0
             apps_v1.replace_namespaced_deployment_scale(name=deployment_name, namespace=namespace, body=scale)
-            socketio.emit('status_update', {'message': 'Pod is stopping...', 'status': 'stopping'})
+            socketio.emit('status_update', {'message': 'Pod is stopping...', 'status': 'Stopping'})
 
         # Confirm the pod has stopped
         while True:
@@ -76,7 +79,6 @@ async def delete_pod():
 
 async def broadcast_logs():
     global log_stream_active
-
     try:
         while True:
             # Check if the pod exists
@@ -137,6 +139,27 @@ async def stop_log_streaming():
         log_stream_active = False
         socketio.emit('status_update', {'message': 'Log streaming stopped.', 'status': 'Stopped'})
 
+@socketio.on('get_status')
+async def get_status():
+    pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
+    if pods:
+        pod_status = pods[0].status.phase
+        socketio.emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status})
+    else:
+        socketio.emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'})
+
+@socketio.on('connect')
+def connect():
+    logging.info(f'${request.sid} connected')
+    get_status()
+
+@socketio.on('disconnect')
+def disconnect():
+    logging.info(f'${request.sid} disconnected')
+
+@socketio.on_error_default
+def default_error_handler(e):
+    logging.exception("SocketIO Error", e)
 
 if __name__ == '__main__':
-    socketio.run(app, host="0.0.0.0", port=5000, debug=False)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True, logger=True, engineio_logger=True)
