@@ -118,13 +118,25 @@
         modalInstance.show();
     }
 
-    async function showAlert(message, type) {
-        const alertContainer = document.getElementById('alertContainer');
-        const alertDiv = document.createElement('div');
-        alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
-        alertDiv.role = 'alert';
-        alertDiv.innerHTML = `${message} <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>`;
-        alertContainer.appendChild(alertDiv);
+    async function showAlert(message, type = 'success', timeout = 5000) {
+        const alert = document.createElement('div')
+        alert.classList.add('alert', `alert-${type}`, 'alert-dismissible', 'fade', 'show');
+        alert.setAttribute('role', 'alert');
+        alert.innerHTML = `<div class="text-break">${htmlEncode(message)}</div>`;
+
+        const closeButton = document.createElement('button');
+        closeButton.setAttribute('type', 'button');
+        closeButton.setAttribute('data-bs-dismiss', 'alert');
+        closeButton.setAttribute('aria-label', 'Close');
+        closeButton.classList.add('btn-close');
+        alert.append(closeButton);
+
+        // Automatisches Entfernen nach Timeout
+        setTimeout(() => {
+            closeButton.click();
+        }, timeout);
+
+        document.getElementById('alertContainer').append(alert);
     }
 
     // Initial status check
