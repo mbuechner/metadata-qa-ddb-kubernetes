@@ -29,7 +29,7 @@ def index():
     return render_template('index.html')
 
 @socketio.on('start_pod')
-def start_pod(data):
+def start_pod():
     global log_stream_active, log_stream_thread
     try:
         if not v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items:
@@ -56,7 +56,7 @@ def start_pod(data):
 
 
 @socketio.on('delete_pod')
-def delete_pod(data):
+def delete_pod():
     try:
         if v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items:
             # Scale the deployment to 0 replicas
@@ -80,7 +80,7 @@ def delete_pod(data):
         emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'}, broadcast=True)
 
 
-def broadcast_logs(data):
+def broadcast_logs():
     global log_stream_active
     try:
         while True:
@@ -123,7 +123,7 @@ def broadcast_logs(data):
         log_stream_active = False
 
 @socketio.on('get_status')
-async def get_status(data):
+def get_status():
     pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
     if pods:
         pod_status = pods[0].status.phase
