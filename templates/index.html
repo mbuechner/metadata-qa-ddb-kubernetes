@@ -122,7 +122,7 @@
         const alert = document.createElement('div')
         alert.classList.add('alert', `alert-${type}`, 'alert-dismissible', 'fade', 'show');
         alert.setAttribute('role', 'alert');
-        alert.innerHTML = `<div class="text-break">${htmlEncode(message)}</div>`;
+        alert.innerHTML = `<div class="text-break">${message}</div>`;
 
         const closeButton = document.createElement('button');
         closeButton.setAttribute('type', 'button');
