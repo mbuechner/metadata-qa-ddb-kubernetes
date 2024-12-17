@@ -68,6 +68,10 @@
             document.getElementById('startButton').disabled = false;
             document.getElementById('stopButton').disabled = true;
             spinner.style.animationIterationCount = 0;
+        } else {
+            document.getElementById('startButton').disabled = false;
+            document.getElementById('stopButton').disabled = false;
+            spinner.style.animationIterationCount = 'infinite';
         }
     });
 
