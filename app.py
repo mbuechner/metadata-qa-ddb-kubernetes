@@ -72,16 +72,20 @@ def delete_pod():
             apps_v1.replace_namespaced_deployment_scale(name=deployment_name, namespace=namespace, body=scale)
             emit('status_update', {'message': 'Pod is stopping...', 'status': 'Stopping'}, broadcast=True)
 
+        last_pod_status = 'Running'
+
         # Confirm the pod has stopped
         while True:
             pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
             if pods:
                 pod_status = pods[0].status.phase
-                emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status}, broadcast=True)
+                if last_pod_status != pod_status:
+                    emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status}, broadcast=True)
+                    last_pod_status = pod_status
             else:
                 emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'}, broadcast=True)
                 break
-            time.sleep(1)  # Asynchrones Schlafen
+            time.sleep(1)
 
     except client.exceptions.ApiException as e:
         emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'}, broadcast=True)
