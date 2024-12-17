@@ -99,7 +99,6 @@ def broadcast_logs(context):
                 # Check if the pod exists
                 pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
                 if not pods:
-                    emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'}, broadcast=True)
                     log_stream_active = False
                     break
 
@@ -141,7 +140,7 @@ def get_status():
         pod_status = pods[0].status.phase
         emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status})
     else:
-        emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'})
+        emit('status_update', {'message': 'Pod stopped.', 'status': 'Stopped'})
 
 @socketio.on('connect')
 def connect():
