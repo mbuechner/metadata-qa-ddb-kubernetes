@@ -1,4 +1,4 @@
-import asyncio
+import time
 import logging
 import os
 import threading
@@ -29,7 +29,7 @@ def index():
     return render_template('index.html')
 
 @socketio.on('start_pod')
-async def start_pod(data):
+def start_pod(data):
     global log_stream_active, log_stream_thread
     try:
         if not v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items:
@@ -49,14 +49,14 @@ async def start_pod(data):
                         log_stream_thread = threading.Thread(target=broadcast_logs)
                         log_stream_thread.start()
                         break
-            await asyncio.sleep(1)  # Asynchrones Schlafen
+            time.sleep(1)  # Asynchrones Schlafen
 
     except client.exceptions.ApiException as e:
         emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'}, broadcast=True)
 
 
 @socketio.on('delete_pod')
-async def delete_pod(data):
+def delete_pod(data):
     try:
         if v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items:
             # Scale the deployment to 0 replicas
@@ -74,13 +74,13 @@ async def delete_pod(data):
             else:
                 emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'}, broadcast=True)
                 break
-            await asyncio.sleep(1)  # Asynchrones Schlafen
+            time.sleep(1)  # Asynchrones Schlafen
 
     except client.exceptions.ApiException as e:
         emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'}, broadcast=True)
 
 
-async def broadcast_logs(data):
+def broadcast_logs(data):
     global log_stream_active
     try:
         while True:
@@ -116,7 +116,7 @@ async def broadcast_logs(data):
                 log_stream_active = False
                 break
 
-            await asyncio.sleep(1)
+            time.sleep(1)
 
     except client.exceptions.ApiException as e:
         emit('log_update', {'message': f"Error: {str(e)}"}, broadcast=True)
@@ -132,15 +132,15 @@ async def get_status(data):
         emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'})
 
 @socketio.on('connect')
-async def connect():
+def connect():
     logging.info(f'{request.sid} connected')
-    await get_status()
+    get_status()
 
 @socketio.on('disconnect')
-async def disconnect():
+def disconnect():
     logging.info(f'{request.sid} disconnected')
 
 @socketio.on_error_default
-async def default_error_handler(e):
+def default_error_handler(e):
     logging.error(f'SocketIO Error: {request.event["message"]} ({request.event["args"]})')
     logging.exception(e)
