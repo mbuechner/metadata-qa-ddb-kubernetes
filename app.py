@@ -145,7 +145,6 @@ def get_status():
 @socketio.on('connect')
 def connect():
     logging.info(f'{request.sid} connected')
-    get_status()
 
 @socketio.on('disconnect')
 def disconnect():
