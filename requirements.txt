@@ -1,5 +1,4 @@
 flask
 flask-socketio
-eventlet
 gunicorn
 kubernetes

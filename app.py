@@ -3,7 +3,7 @@ import logging
 import os
 import threading
 from flask import Flask, render_template, request, copy_current_request_context
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, emit
 from kubernetes import client, config
 
 # Initialize Flask app
@@ -36,7 +36,7 @@ def start_pod():
             scale = apps_v1.read_namespaced_deployment_scale(name=deployment_name, namespace=namespace)
             scale.spec.replicas = 1
             apps_v1.replace_namespaced_deployment_scale(name=deployment_name, namespace=namespace, body=scale)
-            socketio.emit('status_update', {'message': 'Pod is starting...', 'status': 'Starting'}, broadcast=True)
+            emit('status_update', {'message': 'Pod is starting...', 'status': 'Starting'}, broadcast=True)
 
         last_pod_status = ''
         while True:
@@ -44,13 +44,13 @@ def start_pod():
             if pods:
                 pod_status = pods[0].status.phase
                 if last_pod_status != pod_status:
-                    socketio.emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status}, broadcast=True)
+                    emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status}, broadcast=True)
                     last_pod_status = pod_status
                 with log_stream_lock:
                     if pod_status == "Running" and not log_stream_active:
                         @copy_current_request_context
                         def thread_function():
-                            broadcast_logs(app.app_context(), socketio)
+                            broadcast_logs(app.app_context())
 
                         log_stream_active = True
                         log_stream_thread = threading.Thread(target=thread_function)
@@ -59,7 +59,7 @@ def start_pod():
             time.sleep(1)
 
     except client.exceptions.ApiException as e:
-        socketio.emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'}, broadcast=True)
+        emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'}, broadcast=True)
 
 
 @socketio.on('delete_pod')
@@ -70,24 +70,24 @@ def delete_pod():
             scale = apps_v1.read_namespaced_deployment_scale(name=deployment_name, namespace=namespace)
             scale.spec.replicas = 0
             apps_v1.replace_namespaced_deployment_scale(name=deployment_name, namespace=namespace, body=scale)
-            socketio.emit('status_update', {'message': 'Pod is stopping...', 'status': 'Stopping'}, broadcast=True)
+            emit('status_update', {'message': 'Pod is stopping...', 'status': 'Stopping'}, broadcast=True)
 
         # Confirm the pod has stopped
         while True:
             pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
             if pods:
                 pod_status = pods[0].status.phase
-                socketio.emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status}, broadcast=True)
+                emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status}, broadcast=True)
             else:
-                socketio.emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'}, broadcast=True)
+                emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'}, broadcast=True)
                 break
             time.sleep(1)  # Asynchrones Schlafen
 
     except client.exceptions.ApiException as e:
-        socketio.emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'}, broadcast=True)
+        emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'}, broadcast=True)
 
 
-def broadcast_logs(context, socketio):
+def broadcast_logs(context):
     global log_stream_active
     with context:
         try:
@@ -95,7 +95,7 @@ def broadcast_logs(context, socketio):
                 # Check if the pod exists
                 pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
                 if not pods:
-                    socketio.emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'}, broadcast=True)
+                    emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'}, broadcast=True)
                     log_stream_active = False
                     break
 
@@ -113,21 +113,21 @@ def broadcast_logs(context, socketio):
                     for line in log_stream:
                         if not log_stream_active:
                             return
-                        socketio.emit('log_update', {'message': line.decode('utf-8').strip()}, broadcast=True)
+                        emit('log_update', {'message': line.decode('utf-8').strip()}, broadcast=True)
                 except client.exceptions.ApiException as e:
-                    socketio.emit('status_update', {'message': f"{str(e)}", 'status': 'Error'}, broadcast=True)
+                    emit('status_update', {'message': f"{str(e)}", 'status': 'Error'}, broadcast=True)
 
                 # Check if the pod is terminated
                 pod_status = pods[0].status.phase
                 if pod_status != "Running":
-                    socketio.emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status}, broadcast=True)
+                    emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status}, broadcast=True)
                     log_stream_active = False
                     break
 
                 time.sleep(1)
 
         except client.exceptions.ApiException as e:
-            socketio.emit('log_update', {'message': f"Error: {str(e)}"}, broadcast=True)
+            emit('log_update', {'message': f"Error: {str(e)}"}, broadcast=True)
             log_stream_active = False
 
 @socketio.on('get_status')
@@ -135,9 +135,9 @@ def get_status():
     pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
     if pods:
         pod_status = pods[0].status.phase
-        socketio.emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status})
+        emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status})
     else:
-        socketio.emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'})
+        emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'})
 
 @socketio.on('connect')
 def connect():
