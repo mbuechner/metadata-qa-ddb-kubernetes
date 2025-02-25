@@ -57,7 +57,7 @@ def start_job():
                 "name": job_name,
                 "namespace": namespace,
             },
-            "spec": cronjob.spec.job_template.spec,
+            "spec": cronjob.spec.job_template.spec.to_dict(),
             "restartPolicy": "Never"
         }
         
