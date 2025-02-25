@@ -20,6 +20,7 @@ except config.ConfigException:
 
 api_client = client.ApiClient()
 api_core = client.CoreV1Api()
+api_batch = client.BatchV1Api()
 
 # Log stream
 log_stream_active = False
@@ -43,7 +44,7 @@ def start_job():
             return
 
         # Fetch the CronJob template
-        cronjob = api_core.read_namespaced_cron_job(name=cronjob_name, namespace=namespace)
+        cronjob = api_batch.read_namespaced_cron_job(name=cronjob_name, namespace=namespace)
 
         # Define a unique job name
         job_name = f"{cronjob_name}-{int(time.time())}"
@@ -63,12 +64,12 @@ def start_job():
         print(f"Job Body:\n{json.dumps(job_body, indent=2)}")
 
         # Create the Job
-        api_core.create_namespaced_job(namespace=namespace, body=job_body)
+        api_batch.create_namespaced_job(namespace=namespace, body=job_body)
         emit('status_update', {'message': f'Job {job_name} is starting...', 'status': 'Starting'}, broadcast=True)
 
         last_pod_status = ''
         while True:
-            pod_list = api_core.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
+            pod_list = api_batch.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
             if pod_list:
                 pod_status = pod_list[0].status.phase
                 if last_pod_status != pod_status:
@@ -97,7 +98,7 @@ def cancel_job():
     try:
         if job_name:
             # Delete the job
-            api_core.delete_namespaced_job(
+            api_batch.delete_namespaced_job(
                 name=job_name,
                 namespace=namespace,
                 body=client.V1DeleteOptions(propagation_policy='Foreground')
@@ -116,7 +117,7 @@ def broadcast_logs(context):
         try:
             while True:
                 # Check if the job exists
-                pod_list = api_core.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
+                pod_list = api_batch.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
                 if not pod_list:
                     log_stream_active = False
                     break
