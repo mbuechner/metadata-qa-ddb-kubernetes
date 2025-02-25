@@ -69,7 +69,7 @@ def start_job():
 
         last_pod_status = ''
         while True:
-            pod_list = api_batch.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
+            pod_list = api_core.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
             if pod_list:
                 pod_status = pod_list[0].status.phase
                 if last_pod_status != pod_status:
@@ -117,7 +117,7 @@ def broadcast_logs(context):
         try:
             while True:
                 # Check if the job exists
-                pod_list = api_batch.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
+                pod_list = api_core.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
                 if not pod_list:
                     log_stream_active = False
                     break
