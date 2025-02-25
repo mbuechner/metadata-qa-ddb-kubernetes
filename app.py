@@ -61,7 +61,7 @@ def start_job():
             "restartPolicy": "Never"
         }
         
-        emit('log_update', {'message': json.dumps(job_body)}, broadcast=True)
+        print(f"Job Body:\n{json.dumps(job_body, indent=2)}")
 
         # Create the Job
         batch_v1.create_namespaced_job(namespace=namespace, body=job_body)
