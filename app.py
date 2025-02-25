@@ -12,7 +12,11 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY")
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Kubernetes API Configuration
-config.load_incluster_config()
+try:
+    config.load_incluster_config()
+except config.ConfigException:
+    config.load_kube_config()
+
 v1 = client.CoreV1Api()
 apps_v1 = client.AppsV1Api()
 batch_v1 = client.BatchV1Api()
@@ -23,7 +27,6 @@ log_stream_thread = None
 log_stream_lock = threading.Lock()
 
 namespace = "ddbmetadata-qa"
-deployment_name = "ddbmetadata-qa"
 cronjob_name = "ddbmetadata-qa"
 job_name = ""
 
@@ -51,25 +54,26 @@ def start_job():
             "kind": "Job",
             "metadata": {
                 "name": job_name,
-                "namespace": namespace
+                "namespace": namespace,
+                "labels": f"job-name={job_name}"
             },
             "spec": cronjob.spec.job_template.spec
         }
 
         # Create the Job
-        batch_v1.create_namespaced_job(namespace=namespace, body=job_body, label_selector=f"app={cronjob_name}")
+        batch_v1.create_namespaced_job(namespace=namespace, body=job_body, label_selector=f"job-name={job_name}")
         emit('status_update', {'message': f'Job {job_name} is starting...', 'status': 'Starting'}, broadcast=True)
 
-        last_job_status = ''
+        last_pod_status = ''
         while True:
-            jobs = batch_v1.list_namespaced_job(namespace=namespace, label_selector=f"name={job_name}").items
-            if jobs:
-                job_status = jobs[0].status.phase
-                if last_job_status != job_status:
-                    emit('status_update', {'message': f'Job status: {job_status}', 'status': job_status}, broadcast=True)
-                    last_job_status = job_status
+            pod_list = batch_v1.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
+            if pod_list:
+                pod_status = pod_list[0].status.phase
+                if last_pod_status != pod_status:
+                    emit('status_update', {'message': f'Job status: {pod_status}', 'status': pod_status}, broadcast=True)
+                    last_pod_status = pod_status
                 with log_stream_lock:
-                    if job_status == "Running" and not log_stream_active:
+                    if pod_status == "Running" and not log_stream_active:
                         @copy_current_request_context
                         def thread_function():
                             broadcast_logs(app.app_context())
@@ -81,7 +85,9 @@ def start_job():
             time.sleep(1)
 
     except client.exceptions.ApiException as e:
-        emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'}, broadcast=True)
+        error_body = e.body
+        error_reason = e.reason
+        emit('status_update', {'message': f"API Error: {error_reason} - {error_body}", 'status': 'Error'}, broadcast=True)
 
 @socketio.on('cancel_job')
 def cancel_job():
@@ -103,17 +109,17 @@ def cancel_job():
         emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'}, broadcast=True)
 
 def broadcast_logs(context):
-    global log_stream_active
+    global job_name, log_stream_active
     with context:
         try:
             while True:
-                # Check if the pod exists
-                jobs = batch_v1.list_namespaced_job(namespace=namespace, label_selector=f"name={job_name}").items
-                if not pods:
+                # Check if the job exists
+                pod_list = batch_v1.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
+                if not pod_list:
                     log_stream_active = False
                     break
 
-                pod_name = pods[0].metadata.name
+                pod_name = pod_list[0].metadata.name
 
                 try:
                     # Stream logs directly from the Kubernetes API
@@ -132,7 +138,7 @@ def broadcast_logs(context):
                     emit('status_update', {'message': f"{str(e)}", 'status': 'Error'}, broadcast=True)
 
                 # Check if the pod is terminated
-                pod_status = pods[0].status.phase
+                pod_status = pod_list[0].status.phase
                 if pod_status != "Running":
                     emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status}, broadcast=True)
                     log_stream_active = False
@@ -147,9 +153,10 @@ def broadcast_logs(context):
 @socketio.on('connect')
 def connect():
     logging.info(f'{request.sid} connected')
+    emit('status_update', {'message': f'{request.sid} connected to server', 'status': 'Running' if log_stream_active else 'Stopped'}, broadcast=False)
 
 @socketio.on('disconnect')
-def disconnect():
+def disconnect(data):
     logging.info(f'{request.sid} disconnected')
 
 @socketio.on_error_default
