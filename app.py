@@ -5,7 +5,7 @@ import threading
 import json
 from flask import Flask, render_template, request, copy_current_request_context
 from flask_socketio import SocketIO, emit
-from kubernetes import client, config
+from kubernetes import client, config, ApiClient
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -18,9 +18,8 @@ try:
 except config.ConfigException:
     config.load_kube_config()
 
-v1 = client.CoreV1Api()
-apps_v1 = client.AppsV1Api()
-batch_v1 = client.BatchV1Api()
+api_client = client.ApiClient()
+api_core = client.CoreV1Api()
 
 # Log stream
 log_stream_active = False
@@ -44,7 +43,7 @@ def start_job():
             return
 
         # Fetch the CronJob template
-        cronjob = batch_v1.read_namespaced_cron_job(name=cronjob_name, namespace=namespace)
+        cronjob = api_core.read_namespaced_cron_job(name=cronjob_name, namespace=namespace)
 
         # Define a unique job name
         job_name = f"{cronjob_name}-{int(time.time())}"
@@ -57,19 +56,19 @@ def start_job():
                 "name": job_name,
                 "namespace": namespace,
             },
-            "spec": cronjob.spec.job_template.spec.to_dict(),
+            "spec": api_client.sanitize_for_serialization(cronjob.spec.job_template.spec),
             "restartPolicy": "Never"
         }
         
         print(f"Job Body:\n{json.dumps(job_body, indent=2)}")
 
         # Create the Job
-        batch_v1.create_namespaced_job(namespace=namespace, body=job_body)
+        api_core.create_namespaced_job(namespace=namespace, body=job_body)
         emit('status_update', {'message': f'Job {job_name} is starting...', 'status': 'Starting'}, broadcast=True)
 
         last_pod_status = ''
         while True:
-            pod_list = batch_v1.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
+            pod_list = api_core.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
             if pod_list:
                 pod_status = pod_list[0].status.phase
                 if last_pod_status != pod_status:
@@ -98,7 +97,7 @@ def cancel_job():
     try:
         if job_name:
             # Delete the job
-            batch_v1.delete_namespaced_job(
+            api_core.delete_namespaced_job(
                 name=job_name,
                 namespace=namespace,
                 body=client.V1DeleteOptions(propagation_policy='Foreground')
@@ -117,7 +116,7 @@ def broadcast_logs(context):
         try:
             while True:
                 # Check if the job exists
-                pod_list = batch_v1.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
+                pod_list = api_core.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
                 if not pod_list:
                     log_stream_active = False
                     break
@@ -126,7 +125,7 @@ def broadcast_logs(context):
 
                 try:
                     # Stream logs directly from the Kubernetes API
-                    log_stream = v1.read_namespaced_pod_log(
+                    log_stream = api_core.read_namespaced_pod_log(
                         name=pod_name,
                         namespace=namespace,
                         follow=True,
