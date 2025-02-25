@@ -5,7 +5,7 @@ import threading
 import json
 from flask import Flask, render_template, request, copy_current_request_context
 from flask_socketio import SocketIO, emit
-from kubernetes import client, config, ApiClient
+from kubernetes import client, config
 
 # Initialize Flask app
 app = Flask(__name__)
