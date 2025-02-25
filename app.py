@@ -61,7 +61,7 @@ def start_job():
         }
 
         # Create the Job
-        batch_v1.create_namespaced_job(namespace=namespace, body=job_body, label_selector=f"job-name={job_name}")
+        batch_v1.create_namespaced_job(namespace=namespace, body=job_body)
         emit('status_update', {'message': f'Job {job_name} is starting...', 'status': 'Starting'}, broadcast=True)
 
         last_pod_status = ''
