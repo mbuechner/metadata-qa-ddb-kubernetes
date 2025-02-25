@@ -15,6 +15,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 config.load_incluster_config()
 v1 = client.CoreV1Api()
 apps_v1 = client.AppsV1Api()
+batch_v1 = client.BatchV1Api()
 
 # Log stream
 log_stream_active = False
@@ -23,31 +24,52 @@ log_stream_lock = threading.Lock()
 
 namespace = "ddbmetadata-qa"
 deployment_name = "ddbmetadata-qa"
+cronjob_name = "ddbmetadata-qa"
+job_name = ""
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@socketio.on('start_pod')
-def start_pod():
-    global log_stream_active, log_stream_thread
+@socketio.on('start_job')
+def start_job():
+    global job_name, log_stream_active, log_stream_thread
     try:
-        if not v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items:
-            scale = apps_v1.read_namespaced_deployment_scale(name=deployment_name, namespace=namespace)
-            scale.spec.replicas = 1
-            apps_v1.replace_namespaced_deployment_scale(name=deployment_name, namespace=namespace, body=scale)
-            emit('status_update', {'message': 'Pod is starting...', 'status': 'Starting'}, broadcast=True)
+        if job_name:
+            emit('status_update', {'message': f'Job {job_name} is already running.', 'status': 'Running'}, broadcast=True)
+            return
 
-        last_pod_status = ''
+        # Fetch the CronJob template
+        cronjob = batch_v1.read_namespaced_cron_job(name=cronjob_name, namespace=namespace)
+
+        # Define a unique job name
+        job_name = f"{cronjob_name}-{int(time.time())}"
+
+        # Create a new Job spec based on the CronJob
+        job_body = {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": {
+                "name": job_name,
+                "namespace": namespace
+            },
+            "spec": cronjob.spec.job_template.spec
+        }
+
+        # Create the Job
+        batch_v1.create_namespaced_job(namespace=namespace, body=job_body, label_selector=f"app={cronjob_name}")
+        emit('status_update', {'message': f'Job {job_name} is starting...', 'status': 'Starting'}, broadcast=True)
+
+        last_job_status = ''
         while True:
-            pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
-            if pods:
-                pod_status = pods[0].status.phase
-                if last_pod_status != pod_status:
-                    emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status}, broadcast=True)
-                    last_pod_status = pod_status
+            jobs = batch_v1.list_namespaced_job(namespace=namespace, label_selector=f"name={job_name}").items
+            if jobs:
+                job_status = jobs[0].status.phase
+                if last_job_status != job_status:
+                    emit('status_update', {'message': f'Job status: {job_status}', 'status': job_status}, broadcast=True)
+                    last_job_status = job_status
                 with log_stream_lock:
-                    if pod_status == "Running" and not log_stream_active:
+                    if job_status == "Running" and not log_stream_active:
                         @copy_current_request_context
                         def thread_function():
                             broadcast_logs(app.app_context())
@@ -61,35 +83,24 @@ def start_pod():
     except client.exceptions.ApiException as e:
         emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'}, broadcast=True)
 
-
-@socketio.on('delete_pod')
-def delete_pod():
+@socketio.on('cancel_job')
+def cancel_job():
+    global job_name
     try:
-        if v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items:
-            # Scale the deployment to 0 replicas
-            scale = apps_v1.read_namespaced_deployment_scale(name=deployment_name, namespace=namespace)
-            scale.spec.replicas = 0
-            apps_v1.replace_namespaced_deployment_scale(name=deployment_name, namespace=namespace, body=scale)
-            emit('status_update', {'message': 'Pod is stopping...', 'status': 'Stopping'}, broadcast=True)
-
-        last_pod_status = 'Running'
-
-        # Confirm the pod has stopped
-        while True:
-            pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
-            if pods:
-                pod_status = pods[0].status.phase
-                if last_pod_status != pod_status:
-                    emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status}, broadcast=True)
-                    last_pod_status = pod_status
-            else:
-                emit('status_update', {'message': 'Pod has stopped.', 'status': 'Stopped'}, broadcast=True)
-                break
-            time.sleep(1)
+        if job_name:
+            # Delete the job
+            batch_v1.delete_namespaced_job(
+                name=job_name,
+                namespace=namespace,
+                body=client.V1DeleteOptions(propagation_policy='Foreground')
+            )
+            emit('status_update', {'message': f'Job {job_name} has been canceled.', 'status': 'Canceled'}, broadcast=True)
+            job_name = None
+        else:
+            emit('status_update', {'message': 'No active job found to cancel.', 'status': 'Idle'}, broadcast=True)
 
     except client.exceptions.ApiException as e:
         emit('status_update', {'message': f"Error: {str(e)}", 'status': 'Error'}, broadcast=True)
-
 
 def broadcast_logs(context):
     global log_stream_active
@@ -97,7 +108,7 @@ def broadcast_logs(context):
         try:
             while True:
                 # Check if the pod exists
-                pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
+                jobs = batch_v1.list_namespaced_job(namespace=namespace, label_selector=f"name={job_name}").items
                 if not pods:
                     log_stream_active = False
                     break
@@ -132,15 +143,6 @@ def broadcast_logs(context):
         except client.exceptions.ApiException as e:
             emit('log_update', {'message': f"Error: {str(e)}"}, broadcast=True)
             log_stream_active = False
-
-@socketio.on('get_status')
-def get_status():
-    pods = v1.list_namespaced_pod(namespace=namespace, label_selector=f"app={deployment_name}").items
-    if pods:
-        pod_status = pods[0].status.phase
-        emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status})
-    else:
-        emit('status_update', {'message': 'Pod stopped.', 'status': 'Stopped'})
 
 @socketio.on('connect')
 def connect():
