@@ -2,6 +2,7 @@ import time
 import logging
 import os
 import threading
+import json
 from flask import Flask, render_template, request, copy_current_request_context
 from flask_socketio import SocketIO, emit
 from kubernetes import client, config
@@ -60,7 +61,7 @@ def start_job():
             "restartPolicy": "Never"
         }
         
-        emit('log_update', {'message': job_body}, broadcast=True)
+        emit('log_update', {'message': json.dumps(job_body)}, broadcast=True)
 
         # Create the Job
         batch_v1.create_namespaced_job(namespace=namespace, body=job_body)
