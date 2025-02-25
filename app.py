@@ -55,10 +55,12 @@ def start_job():
             "metadata": {
                 "name": job_name,
                 "namespace": namespace,
-                "labels": f"job-name={job_name}"
             },
-            "spec": cronjob.spec.job_template.spec
+            "spec": cronjob.spec.job_template.spec,
+            "restartPolicy": "Never"
         }
+        
+        emit('log_update', {'message': job_body}, broadcast=True)
 
         # Create the Job
         batch_v1.create_namespaced_job(namespace=namespace, body=job_body)
