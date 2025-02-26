@@ -29,7 +29,7 @@ log_stream_lock = threading.Lock()
 
 namespace = "ddbmetadata-qa"
 cronjob_name = "ddbmetadata-qa"
-job_name = ""
+job_name = None
 
 @app.route('/')
 def index():
@@ -50,6 +50,8 @@ def start_job():
         job_name = f"{cronjob_name}-{int(time.time())}"
 
         # Create a new Job spec based on the CronJob
+        
+        
         job_body = {
             "apiVersion": "batch/v1",
             "kind": "Job",
@@ -60,8 +62,6 @@ def start_job():
             "spec": api_client.sanitize_for_serialization(cronjob.spec.job_template.spec),
             "restartPolicy": "Never"
         }
-        
-        print(f"Job Body:\n{json.dumps(job_body, indent=2)}")
 
         # Create the Job
         api_batch.create_namespaced_job(namespace=namespace, body=job_body)
@@ -76,14 +76,19 @@ def start_job():
                     emit('status_update', {'message': f'Job status: {pod_status}', 'status': pod_status}, broadcast=True)
                     last_pod_status = pod_status
                 with log_stream_lock:
-                    if pod_status == "Running" and not log_stream_active:
-                        @copy_current_request_context
-                        def thread_function():
-                            broadcast_logs(app.app_context())
+                    if pod_status == "Running":
+                        if not log_stream_active:
+                            @copy_current_request_context
+                            def thread_function():
+                                broadcast_logs(app.app_context())
 
-                        log_stream_active = True
-                        log_stream_thread = threading.Thread(target=thread_function)
-                        log_stream_thread.start()
+                            log_stream_active = True
+                            log_stream_thread = threading.Thread(target=thread_function)
+                            log_stream_thread.start()
+                        break
+                    elif pod_status == "Failed":
+                        emit('status_update', {'message': f"Starting job failed", 'status': 'Error'}, broadcast=True)  
+                        job_name = None
                         break
             time.sleep(1)
 
@@ -91,6 +96,7 @@ def start_job():
         error_body = e.body
         error_reason = e.reason
         emit('status_update', {'message': f"API Error: {error_reason} - {error_body}", 'status': 'Error'}, broadcast=True)
+        job_name = None
 
 @socketio.on('cancel_job')
 def cancel_job():
@@ -115,43 +121,47 @@ def broadcast_logs(context):
     global job_name, log_stream_active
     with context:
         try:
-            while True:
+            while log_stream_active:
                 # Check if the job exists
                 pod_list = api_core.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_name}").items
                 if not pod_list:
                     log_stream_active = False
+                    job_name = None
                     break
 
                 pod_name = pod_list[0].metadata.name
+                pod_status = pod_list[0].status.phase
 
-                try:
-                    # Stream logs directly from the Kubernetes API
-                    log_stream = api_core.read_namespaced_pod_log(
-                        name=pod_name,
-                        namespace=namespace,
-                        follow=True,
-                        _preload_content=False
-                    ).stream()
+                if pod_status in ["Pending", "Running"]:
+                    try:
+                        # Stream logs directly from the Kubernetes API
+                        log_stream = api_core.read_namespaced_pod_log(
+                            name=pod_name,
+                            namespace=namespace,
+                            follow=True,
+                            _preload_content=False
+                        ).stream()
 
-                    for line in log_stream:
-                        if not log_stream_active:
-                            return
-                        emit('log_update', {'message': line.decode('utf-8').strip()}, broadcast=True)
-                except client.exceptions.ApiException as e:
-                    emit('status_update', {'message': f"{str(e)}", 'status': 'Error'}, broadcast=True)
+                        for line in log_stream:
+                            if not log_stream_active:
+                                return
+                            emit('log_update', {'message': line.decode('utf-8').strip()}, broadcast=True)
+                    except client.exceptions.ApiException as e:
+                        emit('status_update', {'message': f"{str(e)}", 'status': 'Error'}, broadcast=True)
 
                 # Check if the pod is terminated
-                pod_status = pod_list[0].status.phase
-                if pod_status != "Running":
-                    emit('status_update', {'message': f'Pod status: {pod_status}', 'status': pod_status}, broadcast=True)
+                if pod_status in ["Failed", "Succeeded"]:
+                    emit('status_update', {'message': f'Pod {pod_name} status: {pod_status}', 'status': pod_status}, broadcast=True)
                     log_stream_active = False
+                    job_name = None
                     break
 
-                time.sleep(1)
+                time.sleep(3)
 
         except client.exceptions.ApiException as e:
             emit('log_update', {'message': f"Error: {str(e)}"}, broadcast=True)
             log_stream_active = False
+            job_name = None
 
 @socketio.on('connect')
 def connect():
