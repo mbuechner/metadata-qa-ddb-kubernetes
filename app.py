@@ -650,8 +650,12 @@ def connect():
     emit('status_update', {'message': f'{req.sid} mit Server verbunden', 'status': 'Running' if log_stream_active else 'Stopped'}, broadcast=False)
 
 @socketio.on('disconnect')
-def disconnect():
-    """Socket.IO disconnect handler."""
+def disconnect(*args):
+    """Socket.IO disconnect handler.
+
+Flask-SocketIO kann je nach Transport/Version einen Disconnect-Reason übergeben.
+Darum akzeptieren wir optionale Args.
+"""
     req = cast(Any, request)
     logging.info(f'{req.sid} disconnected')
 
