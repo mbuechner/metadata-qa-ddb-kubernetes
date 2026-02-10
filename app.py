@@ -337,6 +337,52 @@ def job_logs(job: str):
     except ApiException as e:
         return {"error": str(e)}, 500
 
+
+@app.delete("/api/jobs/<job>")
+def delete_job(job: str):
+    """Delete a managed job.
+
+Intended for deleting jobs from the UI.
+
+- Only allows managed job names (prefix + DNS label).
+- If the job is still running, deletion acts like a cancel (Kubernetes will terminate pods).
+"""
+    global job_name, log_stream_active
+    if not _is_managed_job_name(job):
+        return {"error": "Unknown job"}, 404
+
+    try:
+        j = _read_job_or_none(job)
+        if j is None:
+            # Already deleted.
+            return {"deleted": True, "job": job}
+
+        is_completed = _is_job_completed(j)
+        is_terminating = _is_job_terminating(j)
+
+        # For running jobs, deleting is effectively a cancel.
+        # Block new starts until termination is confirmed.
+        if not is_completed or is_terminating:
+            with job_state_lock:
+                job_name = job
+            with log_stream_lock:
+                log_stream_active = False
+
+            t = threading.Thread(target=_wait_for_job_termination, args=(job,), daemon=True)
+            t.start()
+
+        api_batch.delete_namespaced_job(
+            name=job,
+            namespace=namespace,
+            body=client.V1DeleteOptions(propagation_policy='Foreground' if not is_completed else 'Background'),
+        )
+        return {"deleted": True, "job": job}
+    except ApiException as e:
+        # Consider 404 as already deleted.
+        if getattr(e, "status", None) == 404:
+            return {"deleted": True, "job": job}
+        return {"error": str(e)}, 500
+
 @app.route('/')
 def index():
     """Rendert die Web-UI."""

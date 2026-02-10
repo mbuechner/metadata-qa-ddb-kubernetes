@@ -4,13 +4,13 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Job-Verwaltung</title>
+    <title>Jobverwaltung</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/slate/bootstrap.min.css" crossorigin="anonymous">
 </head>
 
 <body>
     <div class="container-fluid mt-5">
-        <h1 class="text-center">Job-Verwaltung</h1>
+        <h1 class="text-center">Jobverwaltung</h1>
 
         <div class="d-flex justify-content-center">
             <div id="alertContainer" class="w-75 mt-3"></div>
@@ -310,6 +310,16 @@
                 viewBtn.onclick = () => viewJobLogs(job.name);
                 actionTd.append(viewBtn);
 
+                // Allow deleting any managed job from the UI.
+                const statusLower = (job.status || '').toLowerCase();
+                const isActive = (activeJobCache && job.name === activeJobCache) || statusLower === 'running' || statusLower === 'pending' || statusLower === 'starting';
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'btn btn-outline-danger btn-sm ms-2';
+                deleteBtn.textContent = 'Löschen';
+                deleteBtn.disabled = !!job.isTerminating;
+                deleteBtn.onclick = () => confirmDeleteJob(job.name, isActive);
+                actionTd.append(deleteBtn);
+
                 tr.append(nameTd, statusTd, startedTd, finishedTd, actionTd);
                 jobsTableBody.append(tr);
             }
@@ -367,6 +377,36 @@
                     modalInstance.hide();
                 };
             }
+
+            modalInstance = new bootstrap.Modal(document.getElementById('confirmationModal'));
+            modalInstance.show();
+        }
+
+        function confirmDeleteJob(job, isActive) {
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            const modalConfirmButton = document.getElementById('modalConfirmButton');
+
+            modalTitle.textContent = 'Job löschen';
+            modalBody.textContent = isActive
+                ? `Der Job ${job} ist aktuell aktiv. Möchtest du ihn wirklich löschen? (entspricht Abbrechen/Terminieren)`
+                : `Möchtest du den Job ${job} wirklich löschen?`;
+            modalConfirmButton.onclick = async () => {
+                try {
+                    const response = await fetch(`/api/jobs/${encodeURIComponent(job)}`, { method: 'DELETE' });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        showAlert(data.error || `Fehler beim Löschen (${response.status})`, 'danger');
+                        return;
+                    }
+                    showAlert(`Job ${job} wurde gelöscht`, 'success', 2000);
+                    await refreshJobs();
+                } catch (e) {
+                    showAlert(String(e), 'danger');
+                } finally {
+                    modalInstance.hide();
+                }
+            };
 
             modalInstance = new bootstrap.Modal(document.getElementById('confirmationModal'));
             modalInstance.show();
