@@ -13,5 +13,5 @@ COPY . .
 # Expose the HTTP port
 EXPOSE 8080
 
-# Command to run the Flask app with Gunicorn
-CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:8080", "app:app", "--worker-class", "eventlet"]
+# Command to run the Flask app with Gunicorn (WebSocket support via gevent-websocket)
+CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:8080", "-k", "geventwebsocket.gunicorn.workers.GeventWebSocketWorker", "app:app"]

@@ -41,7 +41,7 @@ cors_allowed_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "*")
 cors_allowed_origins = (
     "*" if cors_allowed_origins_env.strip() == "*" else [o.strip() for o in cors_allowed_origins_env.split(",") if o.strip()]
 )
-socketio = SocketIO(app, cors_allowed_origins=cors_allowed_origins)
+socketio = SocketIO(app, cors_allowed_origins=cors_allowed_origins, async_mode="gevent")
 
 # Server Port
 #
