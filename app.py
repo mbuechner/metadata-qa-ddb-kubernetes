@@ -214,6 +214,21 @@ def _is_job_completed(job: client.V1Job) -> bool:
     return False
 
 
+def _read_job_or_none(name: str) -> client.V1Job | None:
+    """Liest einen Job oder gibt None zurück, wenn er nicht (mehr) existiert (404)."""
+    try:
+        return cast(client.V1Job, api_batch.read_namespaced_job(name=name, namespace=namespace))
+    except ApiException as e:
+        if getattr(e, "status", None) == 404:
+            return None
+        raise
+
+
+def _is_job_terminating(job: client.V1Job) -> bool:
+    metadata = getattr(job, "metadata", None)
+    return bool(getattr(metadata, "deletion_timestamp", None))
+
+
 def _find_incomplete_managed_job() -> tuple[str, str, bool] | None:
     """Return (job_name, status_string, is_terminating) for a managed job that is not completed yet."""
     jobs = cast(list[client.V1Job], api_batch.list_namespaced_job(namespace=namespace).items or [])
@@ -260,9 +275,22 @@ Wird im Hintergrund aufgerufen, damit `cancel_job` sofort zurückkehren kann.
 @app.get("/api/jobs")
 def list_jobs():
     """List jobs created from the managed CronJob (by name prefix)."""
+    global job_name
     try:
         # Prefer the real cluster state over local in-memory state.
         active = _find_incomplete_managed_job()
+
+        # If no active job exists in the cluster, clear a potentially stale in-memory job_name.
+        if not active:
+            with job_state_lock:
+                current = job_name
+            if current and _is_managed_job_name(current):
+                j = _read_job_or_none(current)
+                if j is None or _is_job_completed(j):
+                    with job_state_lock:
+                        if job_name == current:
+                            job_name = None
+
         jobs = cast(list[client.V1Job], api_batch.list_namespaced_job(namespace=namespace).items or [])
         managed = [j for j in jobs if _is_managed_job_name(_job_name(j))]
 
@@ -337,6 +365,30 @@ Flow:
             else:
                 emit('status_update', {'message': f'Job {existing_name} läuft bereits.', 'status': existing_status}, broadcast=True)
             return
+
+        # Kein aktiver Job im Cluster gefunden: räume ggf. stale in-memory State auf.
+        # (z.B. wenn der Job extern gelöscht/abgebrochen wurde).
+        with job_state_lock:
+            current = job_name
+        if current and _is_managed_job_name(current):
+            try:
+                j = _read_job_or_none(current)
+            except ApiException as e:
+                emit('status_update', {'message': f"API-Fehler beim Prüfen von Job {current}: {str(e)}", 'status': 'Error'}, broadcast=True)
+                return
+
+            if j is None or (j and _is_job_completed(j)):
+                with job_state_lock:
+                    if job_name == current:
+                        job_name = None
+            else:
+                # Job existiert noch (oder wird terminiert) → Verhalten wie bisher.
+                status = _job_status_to_string(j)
+                if _is_job_terminating(j):
+                    emit('status_update', {'message': f'Job {current} wird noch terminiert. Bitte warten.', 'status': 'Stopping'}, broadcast=True)
+                else:
+                    emit('status_update', {'message': f'Job {current} läuft bereits.', 'status': status}, broadcast=True)
+                return
 
         with job_state_lock:
             if job_name:

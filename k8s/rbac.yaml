@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ddbmetadata-qa-sa
+  namespace: ddbmetadata-qa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: metadata-qa-ddb-kubernetes
+  namespace: ddbmetadata-qa
+rules:
+  # Read the CronJob template
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get"]
+
+  # Create/list/read/delete Jobs
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+
+  # Find the Job's pod
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+  # Read pod logs
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: metadata-qa-ddb-kubernetes
+  namespace: ddbmetadata-qa
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: metadata-qa-ddb-kubernetes
+subjects:
+  - kind: ServiceAccount
+    name: ddbmetadata-qa-sa
+    namespace: ddbmetadata-qa

@@ -55,7 +55,6 @@ Dann einfach die App wie üblich deployen (Deployment/Service/Ingress). Wichtig:
 
 ### 3) Browser öffnen
 
-- http://localhost:5000
 - http://localhost:8080
 - "Start Job" startet einen neuen Job aus dem CronJob-Template.
 - "Stop Job" bricht den aktuellen Job ab.
@@ -126,9 +125,22 @@ Der ServiceAccount braucht im Ziel-Namespace typischerweise Rechte für:
 
 (Die exakte Minimalmenge hängt an eurer Cluster-Policy/Labels ab.)
 
+Ein lauffähiges Beispiel findest du in [k8s/rbac.yaml](k8s/rbac.yaml) (Namespace/ServiceAccount ggf. anpassen):
+
+```bash
+kubectl apply -f k8s/rbac.yaml
+```
+
 ## Troubleshooting
 
 - **403 Forbidden / RBAC:** ServiceAccount-Rechte prüfen (siehe RBAC-Abschnitt). Typische fehlende Rechte: `batch/jobs delete` oder `pods/log get`.
+
+  Praktische Checks:
+
+  ```bash
+  kubectl -n ddbmetadata-qa auth can-i delete jobs.batch --as=system:serviceaccount:ddbmetadata-qa:ddbmetadata-qa-sa
+  kubectl -n ddbmetadata-qa auth can-i get pods/log --as=system:serviceaccount:ddbmetadata-qa:ddbmetadata-qa-sa
+  ```
 - **Kein Pod erscheint:** `START_POD_TIMEOUT_SECONDS` erhöhen oder CronJob-Template/Images prüfen.
 - **Logs bleiben stehen:** `LOG_STREAM_REQUEST_TIMEOUT_SECONDS` erhöhen (bei sehr langsamen/clusternahen Verbindungen) oder Netzwerk/Ingress prüfen.
 - **Docker + kubeconfig:** In den Beispielen wird `-v %USERPROFILE%\.kube\config:/root/.kube/config:ro` verwendet (Linux-Container). Wenn du mit einem anderen User im Container arbeitest, muss der Pfad im Container ggf. angepasst werden.
