@@ -28,6 +28,31 @@
         <pre id="logs" class="bg-light p-3 border rounded w-75" style="height: 600px; overflow-y: auto;"></pre>
     </div>
 
+    <div class="d-flex justify-content-center mt-4">
+        <div class="w-75">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="mb-0">Jobs</h5>
+                <button id="liveLogsButton" class="btn btn-outline-secondary btn-sm" onclick="showLiveLogs()" disabled>
+                    Show live logs
+                </button>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm table-striped align-middle">
+                    <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Started</th>
+                        <th>Finished</th>
+                        <th></th>
+                    </tr>
+                    </thead>
+                    <tbody id="jobsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <!-- Confirmation Modal -->
     <div class="modal fade" id="confirmationModal" tabindex="-1" aria-labelledby="confirmationModalLabel"
          aria-hidden="true">
@@ -58,27 +83,60 @@
     let modalInstance = null;
     let logsElement = null;
     let spinner = null;
+    let jobsTableBody = null;
+    let logMode = 'live'; // 'live' | 'history'
+    let selectedJob = null;
+
+    function setUiState(state) {
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+
+        if (!spinner) return;
+
+        switch (state) {
+            case 'Running':
+                startButton.disabled = true;
+                stopButton.disabled = false;
+                spinner.style.animationIterationCount = 'infinite';
+                break;
+            case 'Starting':
+            case 'Pending':
+                startButton.disabled = true;
+                stopButton.disabled = false;
+                spinner.style.animationIterationCount = 'infinite';
+                break;
+            case 'Stopping':
+                startButton.disabled = true;
+                stopButton.disabled = true;
+                spinner.style.animationIterationCount = 'infinite';
+                break;
+            case 'Canceled':
+            case 'Succeeded':
+            case 'Failed':
+            case 'Stopped':
+            case 'Idle':
+            case 'Error':
+            default:
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                spinner.style.animationIterationCount = 0;
+                break;
+        }
+    }
 
     // Listen for status updates
     socket.on('status_update', (data) => {
-        showAlert(data.message, (data.status === 'Error') ? 'danger' : 'success');
-        if (data.status === 'Running') {
-            document.getElementById('startButton').disabled = true;
-            document.getElementById('stopButton').disabled = false;
-            spinner.style.animationIterationCount = 'infinite';
-        } else if (data.status === 'Stopped') {
-            document.getElementById('startButton').disabled = false;
-            document.getElementById('stopButton').disabled = true;
-            spinner.style.animationIterationCount = 0;
-        } else {
-            document.getElementById('startButton').disabled = true;
-            document.getElementById('stopButton').disabled = true;
-            spinner.style.animationIterationCount = 'infinite';
-        }
+        const status = data.status || 'Stopped';
+        const alertType = (status === 'Error' || status === 'Failed') ? 'danger' : 'success';
+        showAlert(data.message, alertType);
+        setUiState(status);
     });
 
     // Listen for log updates from the server
     socket.on('log_update', (data) => {
+        if (logMode !== 'live') {
+            return;
+        }
         // Check if the user is at the bottom of the log container
         const isAtBottom = logsElement.scrollHeight - logsElement.scrollTop === logsElement.clientHeight;
         // Append the new log line
@@ -88,6 +146,90 @@
             logsElement.scrollTop = logsElement.scrollHeight;
         }
     });
+
+    function formatIso(iso) {
+        if (!iso) return '';
+        try {
+            return new Date(iso).toLocaleString();
+        } catch {
+            return iso;
+        }
+    }
+
+    async function refreshJobs() {
+        try {
+            const response = await fetch('/api/jobs', {cache: 'no-store'});
+            if (!response.ok) {
+                return;
+            }
+            const data = await response.json();
+            renderJobs(data.jobs || [], data.activeJob);
+        } catch {
+            // ignore transient refresh errors
+        }
+    }
+
+    function renderJobs(jobs, activeJob) {
+        if (!jobsTableBody) return;
+        jobsTableBody.innerHTML = '';
+
+        for (const job of jobs) {
+            const tr = document.createElement('tr');
+            if (activeJob && job.name === activeJob) {
+                tr.classList.add('table-info');
+            }
+
+            const nameTd = document.createElement('td');
+            nameTd.textContent = job.name;
+
+            const statusTd = document.createElement('td');
+            statusTd.textContent = job.status || '';
+
+            const startedTd = document.createElement('td');
+            startedTd.textContent = formatIso(job.startTime);
+
+            const finishedTd = document.createElement('td');
+            finishedTd.textContent = formatIso(job.completionTime);
+
+            const actionTd = document.createElement('td');
+            const viewBtn = document.createElement('button');
+            viewBtn.className = 'btn btn-outline-primary btn-sm';
+            viewBtn.textContent = 'View logs';
+            viewBtn.onclick = () => viewJobLogs(job.name);
+            actionTd.append(viewBtn);
+
+            tr.append(nameTd, statusTd, startedTd, finishedTd, actionTd);
+            jobsTableBody.append(tr);
+        }
+    }
+
+    async function viewJobLogs(job) {
+        try {
+            selectedJob = job;
+            logMode = 'history';
+            document.getElementById('liveLogsButton').disabled = false;
+            showAlert(`Showing logs for ${job}`, 'success', 2000);
+
+            const response = await fetch(`/api/jobs/${encodeURIComponent(job)}/logs?tailLines=2000`, {cache: 'no-store'});
+            const data = await response.json();
+            if (data.error) {
+                showAlert(data.error, 'danger');
+                return;
+            }
+            logsElement.textContent = data.logs || '';
+            logsElement.scrollTop = logsElement.scrollHeight;
+        } catch (e) {
+            showAlert(String(e), 'danger');
+        }
+    }
+
+    function showLiveLogs() {
+        selectedJob = null;
+        logMode = 'live';
+        document.getElementById('liveLogsButton').disabled = true;
+        logsElement.textContent = '';
+        showAlert('Switched to live logs', 'success', 1500);
+    }
 
     async function confirmAction(action) {
         const modalTitle = document.getElementById('modalTitle');
@@ -99,9 +241,7 @@
             modalBody.textContent = 'Are you sure you want to start the job?';
             modalConfirmButton.onclick = () => {
                 logsElement.textContent = '';
-                document.getElementById('startButton').disabled = true;
-                document.getElementById('stopButton').disabled = false;
-                spinner.style.animationIterationCount = 'infinite';
+                setUiState('Starting');
                 socket.emit('start_job');
                 modalInstance.hide();
             };
@@ -109,8 +249,8 @@
             modalTitle.textContent = 'Stop Job';
             modalBody.textContent = 'Are you sure you want to stop the job?';
             modalConfirmButton.onclick = () => {
-                document.getElementById('startButton').disabled = true;
-                document.getElementById('stopButton').disabled = true;
+                setUiState('Stopping');
+                socket.emit('cancel_job');
                 modalInstance.hide();
             };
         }
@@ -143,8 +283,12 @@
     // Initial status check
     document.addEventListener('DOMContentLoaded', () => {
         logsElement = document.getElementById('logs');
+        jobsTableBody = document.getElementById('jobsTableBody');
         spinner = document.getElementById('spinner');
         spinner.style.animationIterationCount = 0;
+
+        refreshJobs();
+        setInterval(refreshJobs, 5000);
     });
 </script>
 </body>
