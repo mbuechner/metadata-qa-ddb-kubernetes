@@ -233,6 +233,22 @@ class KubernetesGatewayTests(unittest.TestCase):
             _request_timeout=7,
         )
 
+    def test_historical_logs_decode_an_additionally_escaped_line_separator(self) -> None:
+        self.core_api.read_namespaced_pod_log.return_value = (
+            r"2026-07-15 first line\r\n2026-07-15 second line\n"
+        )
+
+        logs = self.gateway.read_logs("pod-1", tail_lines=25)
+
+        self.assertEqual(logs, "2026-07-15 first line\n2026-07-15 second line\n")
+
+    def test_historical_logs_do_not_decode_other_literal_escapes(self) -> None:
+        self.core_api.read_namespaced_pod_log.return_value = r"path=C:\new\task"
+
+        logs = self.gateway.read_logs("pod-1", tail_lines=25)
+
+        self.assertEqual(logs, r"path=C:\new\task")
+
     def test_delete_404_is_idempotent_and_readiness_uses_timeout(self) -> None:
         self.batch_api.delete_namespaced_job.side_effect = ApiException(status=404)
 

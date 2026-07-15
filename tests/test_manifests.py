@@ -14,6 +14,11 @@ def resources(filename: str) -> dict[str, dict]:
 
 
 class DeploymentManifestTests(unittest.TestCase):
+    def test_container_disables_unused_gunicorn_control_socket(self) -> None:
+        dockerfile = (PROJECT_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn('"--no-control-socket"', dockerfile)
+
     def test_openshift_example_uses_root_path_by_default(self) -> None:
         manifests = resources("openshift.yaml")
         prefix = manifests["ConfigMap"]["data"]["URL_PREFIX"]

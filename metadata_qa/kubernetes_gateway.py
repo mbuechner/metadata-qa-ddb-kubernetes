@@ -22,6 +22,7 @@ LOGGER = logging.getLogger(__name__)
 MANAGED_BY_LABEL = "app.kubernetes.io/managed-by"
 MANAGED_BY_VALUE = "metadata-qa-ddb-kubernetes"
 CRONJOB_LABEL = "metadata-qa-ddb-kubernetes/cronjob"
+ESCAPED_LINE_SEPARATOR_RE = re.compile(r"\\r\\n|\\n|\\r")
 
 
 class KubernetesError(RuntimeError):
@@ -73,6 +74,21 @@ def _job_status(job: client.V1Job) -> JobStatus:
 def _metadata_name(value: Any) -> str:
     metadata = getattr(value, "metadata", None)
     return cast(str, getattr(metadata, "name", None) or "")
+
+
+def _normalize_historical_logs(value: str | bytes) -> str:
+    """Normalize line endings and one additionally escaped log response."""
+    text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    escaped_separators = list(ESCAPED_LINE_SEPARATOR_RE.finditer(text))
+    escaped_log_block = len(escaped_separators) > 1 or (
+        escaped_separators and escaped_separators[-1].end() == len(text)
+    )
+    if "\n" not in text and escaped_log_block:
+        # Some logging stacks return the whole Kubernetes log response with its line
+        # separators escaped once more. Decode only separators, not arbitrary escapes.
+        text = ESCAPED_LINE_SEPARATOR_RE.sub("\n", text)
+    return text
 
 
 class KubernetesGateway:
@@ -269,8 +285,8 @@ class KubernetesGateway:
     def read_logs(self, pod_name: str, *, tail_lines: int) -> str:
         _, core_api, _ = self._ensure_clients()
         with self._operation("read pod logs"):
-            return cast(
-                str,
+            response = cast(
+                str | bytes,
                 core_api.read_namespaced_pod_log(
                     name=pod_name,
                     namespace=self._settings.namespace,
@@ -279,6 +295,7 @@ class KubernetesGateway:
                     _request_timeout=self._settings.kubernetes_request_timeout_seconds,
                 ),
             )
+            return _normalize_historical_logs(response)
         raise AssertionError("unreachable")
 
     def stream_logs(self, pod_name: str) -> Iterator[bytes | str]:
