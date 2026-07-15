@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.mypy_cache
+.pip-audit-cache
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__
+*.py[cod]
+*.log
+.coverage
+coverage.xml
+htmlcov
+tests

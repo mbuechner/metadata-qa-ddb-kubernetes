@@ -4,40 +4,42 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="application-base-path" content="{{ application_base_path }}">
     <title>Jobverwaltung</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/slate/bootstrap.min.css" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/slate/bootstrap.min.css"
+        crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 
 <body>
-    <div class="container-fluid mt-5">
+    <main class="container-fluid mt-5">
         <h1 class="text-center">Jobverwaltung</h1>
 
         <div class="d-flex justify-content-center">
-            <div id="alertContainer" class="w-75 mt-3"></div>
+            <div id="alertContainer" class="w-75 mt-3" aria-live="polite"></div>
         </div>
 
         <div class="row mt-4">
             <div class="col-md-12 text-center mb-3">
-                <button id="startButton" class="btn btn-success me-2" onclick="confirmAction('start')" disabled>
+                <button id="startButton" class="btn btn-success me-2" type="button" disabled>
                     <span id="spinner" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
                     <span role="status">Job starten</span>
                 </button>
-                <button id="stopButton" class="btn btn-danger me-2" onclick="confirmAction('stop')" disabled>
+                <button id="stopButton" class="btn btn-danger me-2" type="button" disabled>
                     Job stoppen
                 </button>
             </div>
         </div>
 
-        <div id="logs-container" class="d-flex justify-content-center mt-4">
-            <pre id="logs" class="bg-light p-3 border rounded w-75" style="height: 600px; overflow-y: auto;"></pre>
+        <div class="d-flex justify-content-center mt-4">
+            <pre id="logs" class="log-output bg-light p-3 border rounded w-75" aria-label="Job-Logs"></pre>
         </div>
 
         <div class="d-flex justify-content-center mt-4">
-            <div class="w-75">
+            <section class="w-75" aria-labelledby="jobsHeading">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h2 class="h5 mb-0">Jobs</h2>
-                    <button id="liveLogsButton" class="btn btn-outline-secondary btn-sm" onclick="showLiveLogs()"
-                        disabled>
+                    <h2 id="jobsHeading" class="h5 mb-0">Jobs</h2>
+                    <button id="liveLogsButton" class="btn btn-outline-secondary btn-sm" type="button" disabled>
                         Live-Logs anzeigen
                     </button>
                 </div>
@@ -45,51 +47,31 @@
                     <table class="table table-sm table-striped align-middle">
                         <thead>
                             <tr>
-                                <th scope="col">
-                                    <button type="button" class="btn btn-link p-0 text-decoration-none"
-                                        onclick="setSort('name')">
-                                        Name <span id="sortIndicator-name"></span>
-                                    </button>
-                                </th>
-                                <th scope="col">
-                                    <button type="button" class="btn btn-link p-0 text-decoration-none"
-                                        onclick="setSort('status')">
-                                        Status <span id="sortIndicator-status"></span>
-                                    </button>
-                                </th>
-                                <th scope="col">
-                                    <button type="button" class="btn btn-link p-0 text-decoration-none"
-                                        onclick="setSort('startTime')">
-                                        Gestartet <span id="sortIndicator-startTime"></span>
-                                    </button>
-                                </th>
-                                <th scope="col">
-                                    <button type="button" class="btn btn-link p-0 text-decoration-none"
-                                        onclick="setSort('completionTime')">
-                                        Beendet <span id="sortIndicator-completionTime"></span>
-                                    </button>
-                                </th>
-                                <th></th>
+                                <th scope="col"><button type="button" class="sort-button btn btn-link p-0 text-decoration-none"
+                                        data-sort-key="name">Name <span id="sortIndicator-name"></span></button></th>
+                                <th scope="col"><button type="button" class="sort-button btn btn-link p-0 text-decoration-none"
+                                        data-sort-key="status">Status <span id="sortIndicator-status"></span></button></th>
+                                <th scope="col"><button type="button" class="sort-button btn btn-link p-0 text-decoration-none"
+                                        data-sort-key="startTime">Gestartet <span id="sortIndicator-startTime"></span></button></th>
+                                <th scope="col"><button type="button" class="sort-button btn btn-link p-0 text-decoration-none"
+                                        data-sort-key="completionTime">Beendet <span id="sortIndicator-completionTime"></span></button></th>
+                                <th scope="col"><span class="visually-hidden">Aktionen</span></th>
                             </tr>
                         </thead>
                         <tbody id="jobsTableBody"></tbody>
                     </table>
                 </div>
-            </div>
+            </section>
         </div>
 
-        <!-- Bestätigungs-Modal -->
-        <div class="modal fade" id="confirmationModal" tabindex="-1" aria-labelledby="modalTitle" role="dialog"
-            aria-modal="true" aria-hidden="true">
+        <div class="modal fade" id="confirmationModal" tabindex="-1" aria-labelledby="modalTitle" aria-hidden="true">
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h2 class="modal-title h5" id="modalTitle">Bestätige
-                            Aktion</h2>
+                        <h2 class="modal-title h5" id="modalTitle">Aktion bestätigen</h2>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
                     </div>
-                    <div class="modal-body" id="modalBody">Bist du
-                        sicher?</div>
+                    <div class="modal-body" id="modalBody">Bist du sicher?</div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
                         <button type="button" class="btn btn-primary" id="modalConfirmButton">Bestätigen</button>
@@ -97,349 +79,14 @@
                 </div>
             </div>
         </div>
-    </div>
+    </main>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.min.js"
         integrity="sha256-3gQJhtmj7YnV1fmtbVcnAV6eI4ws0Tr48bVZCThtCGQ=" crossorigin="anonymous"></script>
     <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"
         integrity="sha384-mkQ3/7FUtcGyoppY6bz/PORYoGqOl7/aSUMn2ymDOJcapfS6PHqxhRTMh1RR0Q6+"
         crossorigin="anonymous"></script>
-
-    <script>
-        const socket = io();
-
-        let modalInstance = null;
-        let logsElement = null;
-        let spinner = null;
-        let jobsTableBody = null;
-
-        let logMode = 'live'; // 'live' | 'history'
-        let selectedJob = null;
-
-        let jobsCache = [];
-        let activeJobCache = null;
-        let sortConfig = { key: 'startTime', dir: 'desc' };
-
-        function setUiState(state) {
-            const startButton = document.getElementById('startButton');
-            const stopButton = document.getElementById('stopButton');
-
-            if (!spinner) return;
-
-            switch (state) {
-                case 'Running':
-                case 'Starting':
-                case 'Pending':
-                    startButton.disabled = true;
-                    stopButton.disabled = false;
-                    spinner.style.animationIterationCount = 'infinite';
-                    break;
-                case 'Stopping':
-                    startButton.disabled = true;
-                    stopButton.disabled = true;
-                    spinner.style.animationIterationCount = 'infinite';
-                    break;
-                case 'Canceled':
-                case 'Succeeded':
-                case 'Failed':
-                case 'Stopped':
-                case 'Idle':
-                case 'Error':
-                default:
-                    startButton.disabled = false;
-                    stopButton.disabled = true;
-                    spinner.style.animationIterationCount = 0;
-                    break;
-            }
-        }
-
-        socket.on('status_update', (data) => {
-            const status = data.status || 'Stopped';
-            const alertType = (status === 'Error' || status === 'Failed') ? 'danger' : 'success';
-            showAlert(data.message, alertType);
-            setUiState(status);
-        });
-
-        socket.on('log_update', (data) => {
-            if (logMode !== 'live') return;
-
-            const isAtBottom = logsElement.scrollHeight - logsElement.scrollTop === logsElement.clientHeight;
-            logsElement.textContent += `${data.message}\n`;
-            if (isAtBottom) logsElement.scrollTop = logsElement.scrollHeight;
-        });
-
-        function pad2(n) {
-            return String(n).padStart(2, '0');
-        }
-
-        function formatIso(iso) {
-            if (!iso) return '';
-            try {
-                const d = new Date(iso);
-                if (Number.isNaN(d.getTime())) return String(iso);
-                return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-            } catch {
-                return String(iso);
-            }
-        }
-
-        function parseIsoToMillis(iso) {
-            if (!iso) return null;
-            const d = new Date(iso);
-            const t = d.getTime();
-            return Number.isNaN(t) ? null : t;
-        }
-
-        function getSortValue(job, key) {
-            switch (key) {
-                case 'name':
-                    return (job.name || '').toLowerCase();
-                case 'status':
-                    return (job.status || '').toLowerCase();
-                case 'startTime':
-                    return parseIsoToMillis(job.startTime);
-                case 'completionTime':
-                    return parseIsoToMillis(job.completionTime);
-                default:
-                    return null;
-            }
-        }
-
-        function setSort(key) {
-            if (sortConfig.key === key) {
-                sortConfig.dir = (sortConfig.dir === 'asc') ? 'desc' : 'asc';
-            } else {
-                sortConfig.key = key;
-                sortConfig.dir = (key === 'startTime' || key === 'completionTime') ? 'desc' : 'asc';
-            }
-            updateSortIndicators();
-            renderJobs();
-        }
-
-        function updateSortIndicators() {
-            const keys = ['name', 'status', 'startTime', 'completionTime'];
-            for (const k of keys) {
-                const el = document.getElementById(`sortIndicator-${k}`);
-                if (!el) continue;
-                el.textContent = (sortConfig.key === k) ? (sortConfig.dir === 'asc' ? '▲' : '▼') : '';
-            }
-        }
-
-        async function refreshJobs() {
-            try {
-                const response = await fetch('/api/jobs', { cache: 'no-store' });
-                if (!response.ok) return;
-                const data = await response.json();
-
-                jobsCache = Array.isArray(data.jobs) ? data.jobs : [];
-                activeJobCache = data.activeJob || null;
-                applyClusterStateToUi(data);
-                renderJobs();
-            } catch {
-                // ignore transient refresh errors
-            }
-        }
-
-        function applyClusterStateToUi(apiData) {
-            // Keep UI in sync even after reload or when no live log stream is active.
-            const activeJob = apiData && apiData.activeJob ? apiData.activeJob : null;
-            const activeTerminating = apiData && apiData.activeJobTerminating ? true : false;
-            const activeStatus = apiData && apiData.activeJobStatus ? apiData.activeJobStatus : null;
-
-            if (!activeJob) {
-                setUiState('Stopped');
-                return;
-            }
-
-            if (activeTerminating) {
-                setUiState('Stopping');
-                return;
-            }
-
-            // Fallback: use reported status or infer from job list
-            const status = activeStatus || (jobsCache.find(j => j.name === activeJob)?.status) || 'Pending';
-            setUiState(status);
-        }
-
-        function renderJobs() {
-            if (!jobsTableBody) return;
-            jobsTableBody.innerHTML = '';
-
-            const decorated = jobsCache.map((job, idx) => ({ job, idx }));
-            const key = sortConfig.key;
-            const dir = sortConfig.dir;
-
-            decorated.sort((a, b) => {
-                const av = getSortValue(a.job, key);
-                const bv = getSortValue(b.job, key);
-
-                // nulls last
-                if (av == null && bv == null) return a.idx - b.idx;
-                if (av == null) return 1;
-                if (bv == null) return -1;
-
-                let cmp = 0;
-                if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
-                else cmp = String(av).localeCompare(String(bv));
-                if (cmp === 0) return a.idx - b.idx;
-                return (dir === 'asc') ? cmp : -cmp;
-            });
-
-            for (const { job } of decorated) {
-                const tr = document.createElement('tr');
-                if ((job.status && job.status.toLowerCase() === 'running') || (activeJobCache && job.name === activeJobCache)) {
-                    tr.classList.add('table-info');
-                }
-
-                const nameTd = document.createElement('td');
-                nameTd.textContent = job.name;
-
-                const statusTd = document.createElement('td');
-                statusTd.textContent = job.status || '';
-
-                const startedTd = document.createElement('td');
-                startedTd.textContent = formatIso(job.startTime);
-
-                const finishedTd = document.createElement('td');
-                finishedTd.textContent = formatIso(job.completionTime);
-
-                const actionTd = document.createElement('td');
-                const viewBtn = document.createElement('button');
-                viewBtn.className = 'btn btn-outline-primary btn-sm';
-                viewBtn.textContent = 'Logs ansehen';
-                viewBtn.onclick = () => viewJobLogs(job.name);
-                actionTd.append(viewBtn);
-
-                // Allow deleting any managed job from the UI.
-                const statusLower = (job.status || '').toLowerCase();
-                const isActive = (activeJobCache && job.name === activeJobCache) || statusLower === 'running' || statusLower === 'pending' || statusLower === 'starting';
-                const deleteBtn = document.createElement('button');
-                deleteBtn.className = 'btn btn-outline-danger btn-sm ms-2';
-                deleteBtn.textContent = 'Löschen';
-                deleteBtn.disabled = !!job.isTerminating;
-                deleteBtn.onclick = () => confirmDeleteJob(job.name, isActive);
-                actionTd.append(deleteBtn);
-
-                tr.append(nameTd, statusTd, startedTd, finishedTd, actionTd);
-                jobsTableBody.append(tr);
-            }
-        }
-
-        async function viewJobLogs(job) {
-            try {
-                selectedJob = job;
-                logMode = 'history';
-                document.getElementById('liveLogsButton').disabled = false;
-                showAlert(`Logs für ${job} werden angezeigt`, 'success', 2000);
-
-                const response = await fetch(`/api/jobs/${encodeURIComponent(job)}/logs?tailLines=2000`, { cache: 'no-store' });
-                const data = await response.json();
-                if (data.error) {
-                    showAlert(data.error, 'danger');
-                    return;
-                }
-
-                logsElement.textContent = data.logs || '';
-                logsElement.scrollTop = logsElement.scrollHeight;
-            } catch (e) {
-                showAlert(String(e), 'danger');
-            }
-        }
-
-        function showLiveLogs() {
-            selectedJob = null;
-            logMode = 'live';
-            document.getElementById('liveLogsButton').disabled = true;
-            logsElement.textContent = '';
-            showAlert('Auf Live-Logs umgeschaltet', 'success', 1500);
-        }
-
-        async function confirmAction(action) {
-            const modalTitle = document.getElementById('modalTitle');
-            const modalBody = document.getElementById('modalBody');
-            const modalConfirmButton = document.getElementById('modalConfirmButton');
-
-            if (action === 'start') {
-                modalTitle.textContent = 'Job starten';
-                modalBody.textContent = 'Möchtest du den Job wirklich starten?';
-                modalConfirmButton.onclick = () => {
-                    logsElement.textContent = '';
-                    setUiState('Starting');
-                    socket.emit('start_job');
-                    modalInstance.hide();
-                };
-            } else if (action === 'stop') {
-                modalTitle.textContent = 'Job stoppen';
-                modalBody.textContent = 'Möchtest du den Job wirklich stoppen?';
-                modalConfirmButton.onclick = () => {
-                    setUiState('Stopping');
-                    socket.emit('cancel_job');
-                    modalInstance.hide();
-                };
-            }
-
-            modalInstance = new bootstrap.Modal(document.getElementById('confirmationModal'));
-            modalInstance.show();
-        }
-
-        function confirmDeleteJob(job, isActive) {
-            const modalTitle = document.getElementById('modalTitle');
-            const modalBody = document.getElementById('modalBody');
-            const modalConfirmButton = document.getElementById('modalConfirmButton');
-
-            modalTitle.textContent = 'Job löschen';
-            modalBody.textContent = isActive
-                ? `Der Job ${job} ist aktuell aktiv. Möchtest du ihn wirklich löschen? (entspricht Abbrechen/Terminieren)`
-                : `Möchtest du den Job ${job} wirklich löschen?`;
-            modalConfirmButton.onclick = async () => {
-                try {
-                    const response = await fetch(`/api/jobs/${encodeURIComponent(job)}`, { method: 'DELETE' });
-                    const data = await response.json().catch(() => ({}));
-                    if (!response.ok) {
-                        showAlert(data.error || `Fehler beim Löschen (${response.status})`, 'danger');
-                        return;
-                    }
-                    showAlert(`Job ${job} wurde gelöscht`, 'success', 2000);
-                    await refreshJobs();
-                } catch (e) {
-                    showAlert(String(e), 'danger');
-                } finally {
-                    modalInstance.hide();
-                }
-            };
-
-            modalInstance = new bootstrap.Modal(document.getElementById('confirmationModal'));
-            modalInstance.show();
-        }
-
-        async function showAlert(message, type = 'success') {
-            const alert = document.createElement('div');
-            alert.classList.add('alert', `alert-${type}`, 'alert-dismissible', 'fade', 'show');
-            alert.setAttribute('role', 'alert');
-            alert.innerHTML = `<div class="text-break">${message}</div>`;
-
-            const closeButton = document.createElement('button');
-            closeButton.setAttribute('type', 'button');
-            closeButton.setAttribute('data-bs-dismiss', 'alert');
-            closeButton.setAttribute('aria-label', 'Schließen');
-            closeButton.classList.add('btn-close');
-            alert.append(closeButton);
-
-            document.getElementById('alertContainer').append(alert);
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            logsElement = document.getElementById('logs');
-            jobsTableBody = document.getElementById('jobsTableBody');
-            spinner = document.getElementById('spinner');
-
-            spinner.style.animationIterationCount = 0;
-            updateSortIndicators();
-
-            refreshJobs();
-            setInterval(refreshJobs, 5000);
-        });
-    </script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 
 </html>

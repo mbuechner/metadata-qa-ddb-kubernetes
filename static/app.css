@@ -1,0 +1,4 @@
+.log-output {
+    height: 600px;
+    overflow-y: auto;
+}

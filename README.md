@@ -1,157 +1,280 @@
 # metadata-qa-ddb-kubernetes
 
-Kleine Flask + Socket.IO Weboberfläche, um einen Kubernetes **CronJob** manuell als **Job** zu starten/abzubrechen und **Pod-Logs live** im Browser anzuzeigen.
+Weboberfläche zum manuellen Starten, Abbrechen und Löschen eines Kubernetes-CronJobs sowie zum
+Anzeigen historischer und live gestreamter Pod-Logs. Die Anwendung verwendet Flask,
+Flask-SocketIO und den offiziellen Kubernetes-Python-Client.
 
-Die App liest Kubernetes-Konfiguration automatisch aus:
+## Funktionsweise
 
-- **In-Cluster:** `load_incluster_config()`
-- **Lokal/außerhalb:** `load_kube_config()` (dein `kubeconfig`)
+Die Anwendung liest das Job-Template des konfigurierten CronJobs, erzeugt daraus einen Job und
+kennzeichnet ihn mit Management-Labels. Der Kubernetes-Cluster ist die maßgebliche Quelle für
+Jobstatus und Wiederanlauf nach einem Prozessneustart. Prozesslokaler Zustand koordiniert nur einen
+gerade startenden Job, dessen Abbruch und den zugehörigen Live-Log-Stream.
 
-## Konfiguration (Env Vars)
+Die bestehenden Schnittstellen bleiben erhalten:
 
-- `NAMESPACE` (default: `ddbmetadata-qa`)
-- `CRONJOB_NAME` (default: `ddbmetadata-qa`)
-- `SECRET_KEY` (optional; wenn nicht gesetzt, wird ein zufälliger Key generiert)
-- `CORS_ALLOWED_ORIGINS` (default: `*`; ansonsten Komma-separierte Liste, z.B. `https://example.com,https://intranet.local`)
-- `START_POD_TIMEOUT_SECONDS` (default: `120`) – max. Wartezeit bis ein Pod zum Job erscheint
-- `LOG_STREAM_REQUEST_TIMEOUT_SECONDS` (default: `10`) – Request-Timeout für Log-Streaming
-- `PORT` (default: `8080`) – nur relevant für lokalen Start via `python app.py` (Docker/Gunicorn nutzt 8080 fest)
+- HTTP: `GET /`, `GET /api/jobs`, `GET /api/jobs/<job>/logs`,
+  `DELETE /api/jobs/<job>`
+- Socket.IO Client → Server: `start_job`, `cancel_job`
+- Socket.IO Server → Client: `status_update`, `log_update`
 
-### Optional: HTTP Basic Auth
+Zusätzlich stehen `GET /healthz` (Prozess lebt) und `GET /readyz` (CronJob ist über die
+Kubernetes-API erreichbar) zur Verfügung.
 
-Wenn gesetzt, ist für **alle HTTP-Endpunkte inkl. Socket.IO** eine Authentifizierung nötig (Browser zeigt Login-Prompt).
+Mit `URL_PREFIX=/app/manager` liegen alle genannten Pfade einschließlich Assets und Socket.IO
+geschlossen unter `/app/manager`. Beispiele sind dann `/app/manager/api/jobs`,
+`/app/manager/healthz` und `/app/manager/socket.io`.
 
-- `HTTPAUTH_USERNAME`
-- `HTTPAUTH_PASSWORD`
-- `HTTPAUTH_REALM` (optional; default: `metadata-qa`)
+## Architektur
 
-## Smoke-Test (Docker)
-
-### 1) Image bauen
-
-```bash
-docker build -t metadata-qa-ddb-kubernetes:local .
+```text
+Browser (HTTP + Socket.IO)
+          │
+          ▼
+metadata_qa.web             Transport, Authentifizierung, Eingabegrenzen
+          │
+          ▼
+metadata_qa.service         Job-Lebenszyklus, Zustandskoordination, Events
+          │
+          ▼
+metadata_qa.kubernetes_gateway
+                            Timeouts, Clientmodelle, Labels, Ressourcenfreigabe
+          │
+          ▼
+Kubernetes API              CronJob, Jobs, Pods und Pod-Logs
 ```
 
-### 2) Container starten
+- `app.py`: rückwärtskompatibler WSGI- und lokaler Einstiegspunkt
+- `metadata_qa/config.py`: unveränderliche und validierte Konfiguration
+- `metadata_qa/models.py`: transport- und infrastrukturfremde Datenmodelle
+- `metadata_qa/kubernetes_gateway.py`: einzige Grenze zum Kubernetes-Client
+- `metadata_qa/service.py`: fachlicher Job-Lebenszyklus und nebenläufiger Zustand
+- `metadata_qa/web.py`: Flask-/Socket.IO-Adapter und Sicherheitsheader
+- `metadata_qa/application.py`: Application Factory und Zusammensetzung der Abhängigkeiten
+- `static/app.js`: Browserlogik mit begrenztem Live-Log-Puffer
 
-Die App läuft auf Port `8080`.
+Die Architektur bleibt bewusst ein einzelner Dienst ohne DI-Framework oder zusätzlichen
+Datenspeicher.
 
-**Variante A: Zugriff auf Cluster via lokalem kubeconfig**
+## Voraussetzungen und Installation
 
-```bash
-docker run --rm -p 8080:8080 \
-  -e NAMESPACE=ddbmetadata-qa \
-  -e CRONJOB_NAME=ddbmetadata-qa \
-  -v %USERPROFILE%\.kube\config:/root/.kube/config:ro \
-  metadata-qa-ddb-kubernetes:local
-```
+- Python 3.13 oder 3.14 für lokale Entwicklung
+- Zugriff auf den Zielcluster über In-Cluster-Konfiguration oder lokale kubeconfig
+- Ein vorhandener CronJob im konfigurierten Namespace
 
-**Variante B: In-Cluster (Kubernetes Deployment)**
+PowerShell:
 
-Im Cluster nutzt die App automatisch `load_incluster_config()`.
-
-Dann einfach die App wie üblich deployen (Deployment/Service/Ingress). Wichtig: ServiceAccount/RBAC muss passen (siehe unten).
-
-### 3) Browser öffnen
-
-- http://localhost:8080
-- "Start Job" startet einen neuen Job aus dem CronJob-Template.
-- "Stop Job" bricht den aktuellen Job ab.
-
-## Lokaler Run (ohne Docker)
-
-```bash
+```powershell
 python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\python -m pip install -r requirements-dev.txt
 .venv\Scripts\python app.py
 ```
 
-Hinweis: Für produktiv empfiehlt sich Gunicorn (siehe Dockerfile).
-
-## API
-
-Die UI nutzt zusätzlich JSON-Endpunkte, die du auch direkt testen kannst.
-
-### GET /api/jobs
-
-Listet alle Jobs, die zum verwalteten CronJob gehören (Prefix: `${CRONJOB_NAME}-`).
-
-Beispiel:
+Bash:
 
 ```bash
-curl http://localhost:8080/api/jobs
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python app.py
 ```
 
-Antwort (Beispiel-Felder):
+Die UI läuft standardmäßig auf <http://localhost:8080>. Außerhalb eines Clusters wird die
+Standard-kubeconfig verwendet. Kubernetes-Clients werden erst beim ersten Clusterzugriff erzeugt;
+dadurch funktionieren Import, Liveness und isolierte Tests auch ohne kubeconfig.
 
-- `activeJob`: aktuell laufender Jobname (oder `null`)
-- `activeJobStatus`: Status-String (`Running`, `Succeeded`, `Failed`, ...)
-- `jobs`: Liste mit `{ name, status, startTime, completionTime, isTerminating }`
+Die Anwendung selbst lauscht im Container auf HTTP. HTTPS kann am Ingress oder Reverse Proxy
+terminiert werden. Browser-API-Aufrufe und Socket.IO verwenden relative URLs und übernehmen damit
+automatisch das Schema der geöffneten Seite (`http`/`ws` oder `https`/`wss`). Der separate
+Kubernetes-API-Zugriff verwendet in-cluster weiterhin das von Kubernetes vorgegebene HTTPS mit
+aktivierter Zertifikatsprüfung.
 
-### GET /api/jobs/<job>/logs
+## Konfiguration
 
-Holt Logs des ersten Pods, der zu einem Job gehört.
+| Variable | Standard | Bedeutung und Grenzen |
+|---|---:|---|
+| `NAMESPACE` | `ddbmetadata-qa` | Ziel-Namespace; gültiges DNS-Label |
+| `CRONJOB_NAME` | `ddbmetadata-qa` | Verwalteter CronJob; DNS-Label mit höchstens 52 Zeichen |
+| `SECRET_KEY` | zufällig pro Start | Für Produktion als Secret mit stabilem, zufälligem Wert setzen |
+| `CORS_ALLOWED_ORIGINS` | Same-Origin | `*` oder kommaseparierte Origins; `*` nur bewusst verwenden |
+| `URL_PREFIX` | `/` | Optionaler Basispfad, beispielsweise `/app/manager` |
+| `LOG_LEVEL` | `INFO` | `CRITICAL`, `ERROR`, `WARNING`, `INFO` oder `DEBUG` |
+| `PORT` | `8080` | Lokaler Listen-Port, `1..65535` |
+| `HTTPAUTH_USERNAME` | nicht gesetzt | Optionale Basic-Auth; nur gemeinsam mit Passwort zulässig |
+| `HTTPAUTH_PASSWORD` | nicht gesetzt | Optionale Basic-Auth; nur gemeinsam mit Benutzer zulässig |
+| `HTTPAUTH_REALM` | `metadata-qa` | Realm ohne Anführungs-/Steuerzeichen |
+| `START_POD_TIMEOUT_SECONDS` | `120` | Maximale UI-Wartezeit auf einen Pod, höchstens 3600 s |
+| `LOG_STREAM_REQUEST_TIMEOUT_SECONDS` | `10` | Timeout eines einzelnen Follow-Requests, höchstens 600 s |
+| `KUBERNETES_REQUEST_TIMEOUT_SECONDS` | `10` | Timeout regulärer Kubernetes-Aufrufe, höchstens 600 s |
+| `JOB_TERMINATION_TIMEOUT_SECONDS` | `120` | Maximale Hintergrundüberwachung eines Abbruchs, höchstens 3600 s |
+| `DEFAULT_LOG_TAIL_LINES` | `2000` | Standardmenge historischer Logzeilen |
+| `MAX_LOG_TAIL_LINES` | `5000` | Obergrenze je historischem Logabruf, höchstens 100000 |
 
-Optional:
+Ungültige oder mehrdeutige Werte führen beim Start zu einer konkreten Fehlermeldung. Wenn Basic
+Auth aktiviert ist, gilt sie für UI, API und Socket.IO. Liveness und Readiness bleiben für
+Kubernetes-Probes absichtlich ohne Anmeldung erreichbar und geben keine vertraulichen Daten aus.
+TLS sollte am Ingress oder Reverse Proxy terminiert werden; Basic Auth allein verschlüsselt keine
+Zugangsdaten.
 
-- `tailLines`: letzte N Zeilen
+`URL_PREFIX` muss `/`, leer oder ein absoluter Pfad ohne abschließenden Slash sein. Der Default `/`
+und ein leerer Wert bedeuten beide den Root-Pfad. Ein abschließender Slash wird normalisiert.
+Querystrings, Prozentkodierung, `..`, Backslashes und leere
+Pfadsegmente werden abgelehnt. Das Frontend erhält den normalisierten Wert vom Server und verwendet
+ihn für API-, Asset- und Socket.IO-Aufrufe; es sind keine hartcodierten Root-URLs erforderlich.
 
-Beispiel:
+## Docker
 
 ```bash
-curl "http://localhost:8080/api/jobs/<job>/logs?tailLines=200"
+docker build -t metadata-qa-ddb-kubernetes:local .
+docker run --rm -p 8080:8080 \
+  -e NAMESPACE=ddbmetadata-qa \
+  -e CRONJOB_NAME=ddbmetadata-qa \
+  -v "$HOME/.kube/config:/app/.kube/config:ro" \
+  -e KUBECONFIG=/app/.kube/config \
+  metadata-qa-ddb-kubernetes:local
 ```
 
-## Socket.IO Events
+Das Image läuft als nicht privilegierter Benutzer, kopiert nur Laufzeitdateien und besitzt einen
+Liveness-Healthcheck. Gunicorn verwendet absichtlich genau einen Worker.
 
-Der Browser verbindet sich via Socket.IO und nutzt folgende Events:
+## Kubernetes-Deployment
 
-- Client → Server: `start_job`
-- Client → Server: `cancel_job`
-- Server → Client: `status_update` (Payload: `{ message, status }`)
-- Server → Client: `log_update` (Payload: `{ message }`)
+[k8s/rbac.yaml](k8s/rbac.yaml) enthält Namespace-begrenzte Minimalrechte.
+[k8s/deployment.yaml](k8s/deployment.yaml) enthält ein gehärtetes Beispiel für Deployment und
+Service mit Probes, Ressourcenlimits, `readOnlyRootFilesystem` und genau einer Replik.
 
-Hinweis: `status_update` und `log_update` werden in der Regel an alle Clients gebroadcastet.
+Wenn `URL_PREFIX` im Kubernetes-Deployment geändert wird, müssen `livenessProbe.httpGet.path` und
+`readinessProbe.httpGet.path` denselben Prefix erhalten. Der Docker-Healthcheck liest `URL_PREFIX`
+automatisch aus der Umgebung.
 
-## Kubernetes RBAC (Minimalbedarf)
-
-Der ServiceAccount braucht im Ziel-Namespace typischerweise Rechte für:
-
-- `batch/cronjobs`: `get`
-- `batch/jobs`: `create`, `get`, `list`, `delete`
-- `pods`: `get`, `list`
-- `pods/log`: `get`
-
-(Die exakte Minimalmenge hängt an eurer Cluster-Policy/Labels ab.)
-
-Ein lauffähiges Beispiel findest du in [k8s/rbac.yaml](k8s/rbac.yaml) (Namespace/ServiceAccount ggf. anpassen):
+Vor dem Ausrollen Image, Namespace, CronJob-Namen und gegebenenfalls das Secret
+`metadata-qa-ddb-kubernetes` anpassen. Das Secret kann die Schlüssel `secret-key`, `username` und
+`password` enthalten. Zugangsdaten sollten über das vorhandene Secret-Management des Clusters und
+nicht als Klartextmanifest verwaltet werden.
 
 ```bash
 kubectl apply -f k8s/rbac.yaml
+kubectl apply -f k8s/deployment.yaml
+kubectl -n ddbmetadata-qa rollout status deployment/metadata-qa-ddb-kubernetes
 ```
+
+RBAC prüfen:
+
+```bash
+kubectl -n ddbmetadata-qa auth can-i create jobs.batch \
+  --as=system:serviceaccount:ddbmetadata-qa:ddbmetadata-qa-sa
+kubectl -n ddbmetadata-qa auth can-i get pods/log \
+  --as=system:serviceaccount:ddbmetadata-qa:ddbmetadata-qa-sa
+```
+
+## OpenShift-Deployment
+
+[k8s/openshift.yaml](k8s/openshift.yaml) enthält ein vollständiges Beispiel für OpenShift mit
+ServiceAccount, RBAC, ConfigMap, Secret, Deployment, Service und Route. Es setzt keine feste UID und
+ist damit für die übliche `restricted-v2` SCC ausgelegt. Die Edge-Route terminiert TLS am Router und
+spricht den Container intern weiterhin über HTTP an. Mit `insecureEdgeTerminationPolicy: Allow`
+sind beispielhaft HTTP und HTTPS erreichbar; mit `Redirect` kann HTTP auf HTTPS umgeleitet werden.
+Das Beispiel verwendet standardmäßig `URL_PREFIX=/`, Probe-Pfade unter `/` und eine Route mit
+`spec.path: /`. Für eine Bereitstellung unter `/app/manager` müssen `URL_PREFIX`, beide Probe-Pfade
+und `spec.path` gemeinsam auf diesen Präfix umgestellt werden.
+
+Vor dem Anwenden mindestens Image, CronJob-Namen, `SECRET_KEY` und Basic-Auth-Zugangsdaten ändern:
+
+```bash
+oc project ddbmetadata-qa
+oc apply -f k8s/openshift.yaml
+oc rollout status deployment/metadata-qa-ddb-kubernetes
+oc get route metadata-qa-ddb-kubernetes
+```
+
+Für private Images muss zusätzlich ein Image-Pull-Secret am ServiceAccount hinterlegt werden.
+
+## API
+
+### `GET /api/jobs`
+
+Liefert alle verwalteten Jobs sowie `activeJob`, `activeJobStatus` und
+`activeJobTerminating`. Pro Request wird die Jobliste einmal aus Kubernetes gelesen.
+
+### `GET /api/jobs/<job>/logs?tailLines=200`
+
+Liefert historische Logs eines passenden Pods. `tailLines` muss zwischen `1` und
+`MAX_LOG_TAIL_LINES` liegen. Ohne Parameter gilt `DEFAULT_LOG_TAIL_LINES`.
+
+### `DELETE /api/jobs/<job>`
+
+Löscht einen verwalteten Job idempotent. Aktive Jobs werden mit Foreground-Propagation terminiert;
+abgeschlossene Jobs werden im Hintergrund gelöscht.
+
+Fehlerdetails des Kubernetes-Clients werden serverseitig protokolliert, aber nicht an Browser oder
+API-Aufrufer weitergereicht.
+
+## Entwicklung und Qualitätssicherung
+
+```bash
+python -m pytest --cov --cov-report=term-missing
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy
+python -m pip check
+python -m pip_audit -r requirements.txt
+```
+
+Die zentrale Konfiguration steht in `pyproject.toml`. Tests verwenden Fake-Gateways und rufen
+keinen echten Cluster auf. CI führt Linting, Formatprüfung, Typprüfung, Abhängigkeitsaudit und Tests
+vor dem Container-Build aus.
+
+## Sicherheit und Jobzuordnung
+
+Neue Jobs erhalten die Labels:
+
+- `app.kubernetes.io/managed-by=metadata-qa-ddb-kubernetes`
+- `metadata-qa-ddb-kubernetes/cronjob=<CRONJOB_NAME>`
+
+Historische Jobs ohne Labels bleiben übergangsweise sichtbar und löschbar, wenn ihr Name exakt dem
+alten Muster `<CRONJOB_NAME>-<10 bis 13 Ziffern>` entspricht. Beliebige Präfixtreffer werden nicht
+mehr als Eigentumsnachweis akzeptiert. Für eine vollständig labelbasierte Abgrenzung sollten alte
+Jobs nach der Migration auslaufen oder administrativ bereinigt werden.
+
+Browsermeldungen werden ausschließlich als Text gerendert. Sicherheitsheader einschließlich CSP,
+Frame-Schutz und `nosniff` werden zentral gesetzt. Live-Logs sind im Browser auf 5000 DOM-Zeilen
+begrenzt.
+
+## Migration gegenüber älteren Versionen
+
+- `CORS_ALLOWED_ORIGINS` ist ohne expliziten Wert jetzt Same-Origin statt `*`. Für bewusst
+  benötigte Cross-Origin-Clients die erlaubten Origins explizit setzen.
+- Nur eine gesetzte Basic-Auth-Variable ist jetzt ein Konfigurationsfehler statt still deaktivierter
+  Authentifizierung.
+- Historische Logs sind standardmäßig und maximal begrenzt; unzulässige `tailLines` liefern HTTP
+  400.
+- CronJob-Namen über 52 Zeichen werden früh abgelehnt.
+- Kubernetes-Fehler werden als neutrales HTTP 503 gemeldet; Details stehen nur im Serverlog.
+- Neue Jobs werden mit Management-Labels erzeugt; das enge Legacy-Namensschema bleibt kompatibel.
+- Alle bisherigen HTTP-Routen, Socket.IO-Eventnamen und erfolgreichen Payload-Felder bleiben
+  unverändert.
+
+## Bekannte Einschränkungen
+
+- Genau eine Replik und ein Gunicorn-Worker sind unterstützt. Horizontale Skalierung erfordert
+  Sticky Sessions, einen Socket.IO-Message-Broker und verteilte Jobkoordination.
+- Status- und Logereignisse werden weiterhin an alle verbundenen Clients verteilt.
+- Bei mehreren Pods eines Jobs wird der laufende beziehungsweise neueste relevante Pod gewählt;
+  Logs mehrerer paralleler Pods werden nicht zusammengeführt.
+- Bootstrap/Bootswatch und der Socket.IO-Browserclient werden von externen CDNs geladen. In
+  abgeschotteten Umgebungen sollten diese Assets intern gespiegelt werden.
+- Die automatisierten Tests simulieren Kubernetes. Ein echter Cluster-Smoke-Test muss in der
+  jeweiligen Zielumgebung erfolgen.
 
 ## Troubleshooting
 
-- **403 Forbidden / RBAC:** ServiceAccount-Rechte prüfen (siehe RBAC-Abschnitt). Typische fehlende Rechte: `batch/jobs delete` oder `pods/log get`.
-
-  Praktische Checks:
-
-  ```bash
-  kubectl -n ddbmetadata-qa auth can-i delete jobs.batch --as=system:serviceaccount:ddbmetadata-qa:ddbmetadata-qa-sa
-  kubectl -n ddbmetadata-qa auth can-i get pods/log --as=system:serviceaccount:ddbmetadata-qa:ddbmetadata-qa-sa
-  ```
-- **Kein Pod erscheint:** `START_POD_TIMEOUT_SECONDS` erhöhen oder CronJob-Template/Images prüfen.
-- **Logs bleiben stehen:** `LOG_STREAM_REQUEST_TIMEOUT_SECONDS` erhöhen (bei sehr langsamen/clusternahen Verbindungen) oder Netzwerk/Ingress prüfen.
-- **Docker + kubeconfig:** In den Beispielen wird `-v %USERPROFILE%\.kube\config:/root/.kube/config:ro` verwendet (Linux-Container). Wenn du mit einem anderen User im Container arbeitest, muss der Pfad im Container ggf. angepasst werden.
-
-## Entwicklung / Checks
-
-- Syntax-/Import-Check: `py -m py_compile app.py`
-- Wenn VS Code „Fehler“ anzeigt, sind das oft Pylance/Typing-Diagnosen (statische Analyse) – nicht zwingend Runtime-Probleme.
-
-## Hinweise
-
-- Es kann immer nur **ein** Job gleichzeitig laufen (globaler Zustand).
-- Status/Logs werden an alle verbundenen Clients gebroadcastet.
-- Für produktive Nutzung unbedingt CORS einschränken und Auth davor schalten (z.B. OAuth2-Proxy/Ingress-Auth).
+- **`/readyz` liefert 503:** kubeconfig/In-Cluster-Konfiguration, CronJob-Name und RBAC prüfen.
+- **`HTTPSConnectionPool(...:443): Read timed out`:** Diese Meldung betrifft die Kubernetes-API,
+  nicht HTTPS der Weboberfläche. In-Cluster ignoriert die Anwendung für diesen clusterinternen
+  Zugriff jetzt Umgebungs-Proxys, sodass ein unvollständiges `NO_PROXY` nicht mehr zum Timeout
+  führt. Bleibt der Timeout bestehen, blockiert meist eine NetworkPolicy oder Cluster-Firewall den
+  Zugriff des Pods auf den Kubernetes-Service.
+- **Kein Pod erscheint:** CronJob-Template, Image-Pull und Scheduler-Events prüfen; gegebenenfalls
+  `START_POD_TIMEOUT_SECONDS` erhöhen.
+- **Live-Logs verbinden sich wiederholt:** Netzwerk/Ingress und
+  `LOG_STREAM_REQUEST_TIMEOUT_SECONDS` prüfen. Ein Timeout wird automatisch erneut verbunden.
+- **403 von Kubernetes:** ServiceAccount und die Regeln in `k8s/rbac.yaml` kontrollieren.

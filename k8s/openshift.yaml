@@ -1,0 +1,195 @@
+# OpenShift example for metadata-qa-ddb-kubernetes.
+#
+# Before applying:
+# - replace the example credentials and SECRET_KEY below;
+# - adjust CRONJOB_NAME and the image reference;
+# - apply this file inside the intended OpenShift project/namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: metadata-qa-ddb-kubernetes
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: metadata-qa-ddb-kubernetes
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: metadata-qa-ddb-kubernetes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: metadata-qa-ddb-kubernetes
+subjects:
+  - kind: ServiceAccount
+    name: metadata-qa-ddb-kubernetes
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metadata-qa-ddb-kubernetes
+data:
+  CRONJOB_NAME: "ddbmetadata-qa"
+  URL_PREFIX: "/"
+  HTTPAUTH_REALM: "metadata-qa"
+  LOG_LEVEL: "INFO"
+  CORS_ALLOWED_ORIGINS: ""
+  START_POD_TIMEOUT_SECONDS: "120"
+  LOG_STREAM_REQUEST_TIMEOUT_SECONDS: "10"
+  KUBERNETES_REQUEST_TIMEOUT_SECONDS: "10"
+  JOB_TERMINATION_TIMEOUT_SECONDS: "120"
+  DEFAULT_LOG_TAIL_LINES: "2000"
+  MAX_LOG_TAIL_LINES: "5000"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: metadata-qa-ddb-kubernetes
+type: Opaque
+stringData:
+  # Example values only. Replace them through your OpenShift secret management.
+  SECRET_KEY: "replace-with-a-random-secret-key-of-at-least-32-characters"
+  HTTPAUTH_USERNAME: "metadata-admin"
+  HTTPAUTH_PASSWORD: "replace-with-a-strong-password"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metadata-qa-ddb-kubernetes
+  labels:
+    app.kubernetes.io/name: metadata-qa-ddb-kubernetes
+    app.kubernetes.io/part-of: metadata-qa
+spec:
+  # The application coordinates a live log stream in process-local state.
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: metadata-qa-ddb-kubernetes
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: metadata-qa-ddb-kubernetes
+        app.kubernetes.io/part-of: metadata-qa
+    spec:
+      serviceAccountName: metadata-qa-ddb-kubernetes
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: application
+          image: ghcr.io/mbuechner/metadata-qa-ddb-kubernetes:main
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: metadata-qa-ddb-kubernetes
+            - secretRef:
+                name: metadata-qa-ddb-kubernetes
+          env:
+            # Keep the example reusable in any OpenShift project.
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metadata-qa-ddb-kubernetes
+  labels:
+    app.kubernetes.io/name: metadata-qa-ddb-kubernetes
+spec:
+  selector:
+    app.kubernetes.io/name: metadata-qa-ddb-kubernetes
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  sessionAffinity: None
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: metadata-qa-ddb-kubernetes
+  labels:
+    app.kubernetes.io/name: metadata-qa-ddb-kubernetes
+  annotations:
+    # Keep WebSocket/log-stream connections open at the OpenShift router.
+    haproxy.router.openshift.io/timeout: 10m
+spec:
+  # Omit host to let OpenShift generate one. Alternatively set, for example:
+  # host: metadata-qa-ddb-kubernetes.apps.example.com
+  to:
+    kind: Service
+    name: metadata-qa-ddb-kubernetes
+    weight: 100
+  path: /
+  port:
+    targetPort: http
+  tls:
+    # TLS ends at the OpenShift router; router-to-pod traffic stays HTTP.
+    termination: edge
+    # Allow both external HTTP and HTTPS. Use Redirect to enforce HTTPS.
+    insecureEdgeTerminationPolicy: Allow
+  wildcardPolicy: None

@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metadata-qa-ddb-kubernetes
+  namespace: ddbmetadata-qa
+spec:
+  # Process-local stream coordination requires a single replica.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: metadata-qa-ddb-kubernetes
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: metadata-qa-ddb-kubernetes
+    spec:
+      serviceAccountName: ddbmetadata-qa-sa
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: application
+          image: ghcr.io/mbuechner/metadata-qa-ddb-kubernetes:main
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: URL_PREFIX
+              # Root deployment by default; update probes below when changing this value.
+              value: "/"
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CRONJOB_NAME
+              value: ddbmetadata-qa
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: metadata-qa-ddb-kubernetes
+                  key: secret-key
+                  optional: true
+            - name: HTTPAUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: metadata-qa-ddb-kubernetes
+                  key: username
+                  optional: true
+            - name: HTTPAUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: metadata-qa-ddb-kubernetes
+                  key: password
+                  optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metadata-qa-ddb-kubernetes
+  namespace: ddbmetadata-qa
+spec:
+  selector:
+    app.kubernetes.io/name: metadata-qa-ddb-kubernetes
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
